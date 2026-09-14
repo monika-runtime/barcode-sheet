@@ -118,9 +118,12 @@
   .statusbar .spacer{flex:1}
 
   /* ---------- preview ---------- */
-  /* no scrollbars: the page is scaled to fit, so there is nothing to scroll to. The soft
-     drop shadow is drawn outside the page box and would otherwise reserve a scrollbar. */
-  .previewwrap{padding:18px; background:#0b0d10; overflow:hidden; height:calc(100vh - 63px - var(--sb-h,56px))}
+  /* A page is scaled to fit the column, so a one-page sheet needs no scrolling at all.
+     A sheet with more pages stacks them and scrolls: three pages cannot all be legible at
+     once, and every page still has to be reachable. The soft drop shadow is drawn outside
+     the page box, hence the extra bottom padding. */
+  .previewwrap{padding:18px 18px 30px; background:#0b0d10; overflow-y:auto; overflow-x:hidden;
+               height:calc(100vh - 63px - var(--sb-h,56px))}
   @media (max-width:1000px){ .previewwrap{height:auto; max-height:none; overflow:auto} }
   .previewlabel{
     font-size:12px; color:var(--dim); margin:0 0 10px;
@@ -132,11 +135,18 @@
     border:1px solid var(--line); border-radius:6px; padding:1px 6px;
   }
   .previewlabel .zoom:empty{display:none}
-  /* the page is scaled with a transform, so the slot above it collapses to the scaled height
-     and the wrapper never needs to scroll */
-  .pageslot{width:100%}
+  /* One .pagewrap per page. Its width/height are the SCALED page size (set in JS) so the flow
+     reserves the right room, while .page keeps its true mm size and is shrunk by a transform —
+     the barcodes still render at true size underneath. */
+  .pageslot{width:100%; display:flex; flex-direction:column; align-items:center; gap:34px}
+  .pagewrap{position:relative}
+  .pagecap{
+    position:absolute; top:100%; left:2px; margin-top:7px; font-size:11px;
+    color:var(--dim); letter-spacing:.02em;
+  }
+  .pagecap:empty{display:none}
   .page{
-    background:#fff; margin:0 0 18px; box-shadow:0 6px 26px rgba(0,0,0,.5);
+    background:#fff; box-shadow:0 6px 26px rgba(0,0,0,.5);
     position:relative; overflow:hidden;
   }
   .sheet{display:grid}
@@ -155,7 +165,9 @@
   .label:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
   .label.empty{cursor:default; background:transparent; outline:1px dashed #dbe2ea}
   #drophint{
-    position:absolute; display:none; border:2px dashed var(--accent2); border-radius:4px;
+    /* fixed + viewport coordinates: with more than one page the hint must be able to land on
+       any of them, and every page carries its own scale transform */
+    position:fixed; display:none; border:2px dashed var(--accent2); border-radius:4px;
     background:rgba(74,157,122,.12); pointer-events:none; z-index:6;
   }
   #drophint.on{display:block}
@@ -190,7 +202,12 @@
     header,.panel,.previewwrap .previewlabel,.statusbar,#snack,#ghost,#drophint{display:none !important}
     .layout{display:block; min-height:0}
     .previewwrap{padding:0; background:#fff; max-height:none; height:auto; overflow:visible}
-    .pageslot{height:auto !important; overflow:visible}
+    .pageslot{display:block !important; height:auto !important; padding:0 !important; gap:0 !important; overflow:visible}
+    .pagecap{display:none !important}
+    /* one preview page = one printed sheet */
+    .pagewrap{position:static; width:auto !important; height:auto !important; margin:0 !important;
+              break-after:page; page-break-after:always}
+    .pagewrap:last-child{break-after:auto; page-break-after:auto}
     .page{box-shadow:none; margin:0; width:auto !important; height:auto !important; padding:0 !important; overflow:visible; transform:none !important}
     .label{outline:none !important}
     .label.outline{outline:1px dashed #ddd !important}
@@ -352,7 +369,8 @@
       <span class="zoom" id="zoomNote" title="The preview is scaled to fit your window. Printing is always full size."></span>
       <span id="pages"></span>
     </div>
-    <div class="pageslot" id="pageslot"><div class="page" id="page"><div class="sheet" id="sheet"></div><div id="drophint"></div></div></div>
+    <div class="pageslot" id="pageslot"></div>
+      <div id="drophint"></div>
   </div>
 </div>
 
@@ -511,29 +529,33 @@
     // and would feed the scale back into itself, so fall back to the viewport there.
     // Stacked (narrow) layout: the preview sits under the form and is scrolled to anyway, so
     // only the width constrains it — fitting the height there would make the page unreadably small.
-    var availH = cs.height === "auto" ? Infinity : wrap.clientHeight - padY - labBlock;
+    // 2px of slack: the scaled height is rounded to whole pixels, and a single pixel of
+    // overflow is enough to raise a scrollbar on a one-page sheet
+    var availH = cs.height === "auto" ? Infinity : wrap.clientHeight - padY - labBlock - 2;
     if (!(availW > 40) || !(availH > 40)) return 1;
     return Math.max(0.15, Math.min(1, availW / (d[0] * MM), availH / (d[1] * MM)));
   }
   // Scaling is a CSS transform, so the barcodes themselves keep rendering at true size and
   // only the on-screen view shrinks. Printing resets the transform, so paper is untouched.
   function applyFit(d){
-    var pg = $("page"), slot = $("pageslot");
-    if (!pg || !slot) return 1;
+    var slot = $("pageslot");
+    if (!slot) return 1;
     measureChrome();   // the bar's real height sizes the column this fit is measured against
     d = d || pageDims();
-    var s = fitPreview(d);
+    var s = fitPreview(d);   // one page is what has to fit; more pages scroll
     PREVIEW_SCALE = s;
-    // Explicit translate+scale from the top-left corner: an auto-margin centred box that is
-    // wider than its container does not stay centred once a transform is applied to it.
-    var scaledW = d[0] * MM * s;
-    var dx = Math.max(0, Math.round((slot.clientWidth - scaledW) / 2));
-    pg.style.transformOrigin = "top left";
-    pg.style.transform = s < 0.999
-      ? "translateX(" + dx + "px) scale(" + s + ")"
-      : (dx ? "translateX(" + dx + "px)" : "none");
-    pg.style.marginBottom = "0px";   // the slot already accounts for the scaled height
-    slot.style.height = Math.round(d[1] * MM * s) + "px";
+    // The wrapper reserves the SCALED page size so the pages stack correctly in the flow, and
+    // the page inside it is shrunk from its top-left corner. Centring is the column's job now
+    // (a flex column with align-items:center), so no auto-margin/transform fight.
+    var W = Math.floor(d[0] * MM * s), H = Math.floor(d[1] * MM * s);
+    Array.prototype.forEach.call(slot.children, function(w){
+      var pg = w.querySelector(".page");
+      w.style.width = W + "px";
+      w.style.height = H + "px";
+      if (!pg) return;
+      pg.style.transformOrigin = "top left";
+      pg.style.transform = s < 0.999 ? "scale(" + s + ")" : "none";
+    });
     var z = $("zoomNote");
     if (z) z.textContent = s < 0.999 ? "fit " + Math.round(s * 100) + "%" : "full size";
     return s;
@@ -560,31 +582,33 @@
   }
 
   function setPageStyle(){
-    var d = pageDims(), m = n("margin",10,0,40), gap = n("gap",4,0,40);
-    var css = "@page{ size:" + (d[0]/25.4).toFixed(3) + "in " + (d[1]/25.4).toFixed(3) + "in; margin:" + m + "mm; }";
-    var tag = $("pagestyle") || document.createElement("style");
-    tag.id = "pagestyle"; tag.textContent = css;
-    if (!tag.parentNode) document.head.appendChild(tag);
-
+    var d = pageDims(), m = n("margin",10,0,40), gap = n("gap",4,0,40), lw = n("labelW",60,10,300);
     var usableW = d[0] - 2*m, usableH = d[1] - 2*m;
     var cols = Math.round(n("cols",3,1,8));
     if ($("fitCols").checked){
-      cols = Math.max(1, Math.floor((usableW + gap) / (n("labelW",60,10,300) + gap)));
+      cols = Math.max(1, Math.floor((usableW + gap) / (lw + gap)));
       $("cols").value = cols;
     }
-    // preview scales the page 1:1 in mm
-    var pg = $("page");
-    pg.style.width = d[0] + "mm";
-    pg.style.height = usableH + "mm";
-    pg.style.padding = m + "mm";
-    pg.style.background = "#fff";
-    var sh = $("sheet");
-    sh.style.gridTemplateColumns = "repeat(" + cols + ", " + (n("labelW",60,10,300)) + "mm)";
-    sh.style.gap = gap + "mm";
-    sh.style.justifyContent = "center";
-    sh.style.setProperty("--gap-mm", gap + "mm");
+    // Every page carries the same geometry, so it is written once as CSS instead of being
+    // painted onto one element. The print block overrides the sizes with !important.
+    var css = "@page{ size:" + (d[0]/25.4).toFixed(3) + "in " + (d[1]/25.4).toFixed(3) + "in; margin:" + m + "mm; }"
+      + "\n.page{width:" + d[0] + "mm; height:" + d[1] + "mm; padding:" + m + "mm; background:#fff;}"
+      + "\n.sheet{display:grid; grid-template-columns:repeat(" + cols + ", " + lw + "mm); gap:" + gap
+      + "mm; justify-content:center; --gap-mm:" + gap + "mm;}";
+    var tag = $("pagestyle") || document.createElement("style");
+    tag.id = "pagestyle"; tag.textContent = css;
+    if (!tag.parentNode) document.head.appendChild(tag);
     applyFit(d);
     return { cols: cols, usableW: usableW, usableH: usableH };
+  }
+  // rows that fit on one page, and therefore slots per page — shared by the preview, the
+  // status bar and the drag geometry so they can never disagree about where a page ends
+  function rowsPerPage(){
+    var d = pageDims(), m = n("margin",10,0,40), gap = n("gap",4,0,40), lh = n("labelH",30,8,200);
+    return Math.max(1, Math.floor((d[1] - 2*m + gap) / (lh + gap)));
+  }
+  function perPageNow(){
+    return Math.round(n("cols",3,1,8)) * rowsPerPage();
   }
 
   function render(){
@@ -597,8 +621,7 @@
     var fontSizePt = n("fontSize",8,4,18);
 
     var geom = setPageStyle();
-    var sheet = $("sheet");
-    sheet.innerHTML = "";
+    $("pageslot").innerHTML = "";   // paint() rebuilds the pages, since the page count can change
     NODES = [];
     // The layout rebuilds itself in paste order whenever the number of values changes, so
     // editing the list can never leave a stale arrangement behind.
@@ -707,7 +730,7 @@
     });
 
     paint();
-    var perPage = geom.cols * Math.max(1, Math.floor((geom.usableH + n("gap",4,0,40)) / (lh + n("gap",4,0,40))));
+    var perPage = perPageNow();
     var total = vals.length;
     var slots = LAYOUT.length;
     var blanks = LAYOUT.filter(function(v){ return v == null; }).length;
@@ -812,14 +835,35 @@
   }
   function paint(){
     var lw = n("labelW",60,10,300), lh = n("labelH",30,8,200), padmm = n("pad",2,0,20);
-    var sheet = $("sheet");
-    sheet.innerHTML = "";
+    var slot = $("pageslot");
+    var per = perPageNow();
+    var nPages = Math.max(1, Math.ceil(LAYOUT.length / per));
+    // One .pagewrap per page, rebuilt only when the page count changes so dragging never
+    // discards the nodes the pointer is holding on to.
+    if (slot.children.length !== nPages){
+      slot.innerHTML = "";
+      for (var p = 0; p < nPages; p++){
+        var w = document.createElement("div"); w.className = "pagewrap";
+        var cap = document.createElement("div"); cap.className = "pagecap";
+        var pg = document.createElement("div"); pg.className = "page";
+        var sh = document.createElement("div"); sh.className = "sheet";
+        pg.appendChild(sh); w.appendChild(cap); w.appendChild(pg); slot.appendChild(w);
+      }
+    }
+    var wraps = slot.children;
+    for (var q = 0; q < nPages; q++){
+      wraps[q].firstChild.textContent = nPages > 1 ? "Page " + (q + 1) + " of " + nPages : "";
+      var tgt = wraps[q].querySelector(".sheet");
+      while (tgt.firstChild) tgt.removeChild(tgt.firstChild);
+    }
     for (var i = 0; i < LAYOUT.length; i++){
       var vi = LAYOUT[i];
+      var sheet = wraps[Math.min(nPages - 1, Math.floor(i / per))].querySelector(".sheet");
       if (vi == null || !NODES[vi]) sheet.appendChild(emptyCell(lw, lh, padmm));
       else sheet.appendChild(NODES[vi]);
     }
     updateLayoutStat();
+    applyFit();   // the page boxes just changed size
     // keep the machine-readable report in step with the DOM (external checks read window.__report)
     if (window.__report){
       window.__report.layout = LAYOUT.slice();
@@ -846,32 +890,55 @@
     for (var i = 0; i < LAYOUT.length; i++){ if (LAYOUT[i] != null && NODES[LAYOUT[i]] === node) return i; }
     return -1;
   }
+  function wrapRects(){
+    var out = [];
+    Array.prototype.forEach.call(document.querySelectorAll("#pageslot .pagewrap"), function(w){
+      out.push(w.getBoundingClientRect());
+    });
+    return out;
+  }
+  function cellsInOrder(){ return document.querySelectorAll("#pageslot .label"); }
+  function cellNode(slot){ return cellsInOrder()[slot] || null; }
   function geomOf(){
-    var first = $("sheet").children[0];
+    var wrap = document.querySelector("#pageslot .pagewrap");
+    var page = wrap && wrap.querySelector(".page");
+    var first = page && page.querySelector(".sheet").children[0];
     if (!first) return null;
     var r = first.getBoundingClientRect();
     var cols = Math.round(n("cols",3,1,8)), gap = n("gap",4,0,40);
-    var d = pageDims(), m = n("margin",10,0,40), lh = n("labelH",30,8,200);
-    var rows = Math.max(1, Math.floor((d[1] - 2*m + gap) / (lh + gap)));
+    var rows = rowsPerPage();
     return { x0:r.left, y0:r.top, w:r.width, h:r.height, gap:gap*MM*PREVIEW_SCALE,
-             cols:cols, rows:rows, scale:PREVIEW_SCALE };
+             cols:cols, rows:rows, scale:PREVIEW_SCALE, perPage:cols*rows };
   }
   function cellAt(g, x, y){
-    // pure geometry, so the snap target is the nearest printed cell no matter what is under the cursor
-    var col = Math.floor((x - g.x0) / (g.w + g.gap));
-    var row = Math.floor((y - g.y0) / (g.h + g.gap));
+    // Nearest page first (vertically), then pure grid geometry inside it, so the snap target is
+    // the printed cell nearest the cursor no matter what is under the pointer.
+    var wraps = wrapRects(), pi = 0, best = Infinity;
+    for (var i = 0; i < wraps.length; i++){
+      var out = Math.max(wraps[i].top - y, y - wraps[i].bottom, 0);
+      if (out < best){ best = out; pi = i; }
+      if (out === 0) break;
+    }
+    var node = null, wrap = wraps[pi] && document.querySelectorAll("#pageslot .pagewrap")[pi];
+    if (wrap){ var sh = wrap.querySelector(".sheet"); node = sh && sh.children[0]; }
+    if (!node) return { col: 0, row: 0, page: pi, slot: pi * g.perPage };
+    var r = node.getBoundingClientRect();
+    var col = Math.floor((x - r.left) / (g.w + g.gap));
+    var row = Math.floor((y - r.top) / (g.h + g.gap));
     col = Math.max(0, Math.min(g.cols - 1, col));
     row = Math.max(0, Math.min(g.rows - 1, row));
-    return { col: col, row: row, slot: row*g.cols + col };
+    return { col: col, row: row, page: pi, slot: pi*g.perPage + row*g.cols + col };
   }
   function showHint(g, c){
-    var hint = $("drophint"), pr = $("page").getBoundingClientRect();
-    // the hint lives inside the scaled page, so screen distances are divided back out
-    var s = g.scale || 1;
-    hint.style.left = ((g.x0 + c.col*(g.w + g.gap) - pr.left) / s) + "px";
-    hint.style.top  = ((g.y0 + c.row*(g.h + g.gap) - pr.top) / s) + "px";
-    hint.style.width = (g.w / s) + "px";
-    hint.style.height = (g.h / s) + "px";
+    var hint = $("drophint"), node = cellNode(c.slot);
+    if (!node){ hint.className = ""; return; }
+    // viewport coordinates read off the real cell, so the outline lands exactly on the target
+    // wherever it is — any page, any scale
+    var r = node.getBoundingClientRect();
+    hint.style.left = r.left + "px";
+    hint.style.top = r.top + "px";
+    hint.style.width = r.width + "px";
+    hint.style.height = r.height + "px";
     hint.className = "on";
   }
   function hideDragUI(){
@@ -879,7 +946,10 @@
     var gh = $("ghost"); gh.className = ""; gh.innerHTML = "";
   }
   function cellName(slot, cols){
-    return "row " + (Math.floor(slot / cols) + 1) + ", column " + (slot % cols + 1);
+    var per = cols * rowsPerPage();
+    var pg = Math.floor(slot / per), loc = slot - pg * per;
+    return (pg ? "page " + (pg + 1) + ", " : "") + "row " + (Math.floor(loc / cols) + 1)
+      + ", column " + (loc % cols + 1);
   }
   function moveSlot(src, dst){
     if (src < 0 || dst < 0 || src === dst) return false;
@@ -947,7 +1017,7 @@
     var nrow = Math.max(0, row + d[0]), ncol = Math.max(0, Math.min(cols - 1, col + d[1]));
     var dst = nrow*cols + ncol;
     if (!moveSlot(src, dst)) return;
-    var nx = $("sheet").children[dst];
+    var nx = cellNode(dst);
     if (nx && nx.focus) nx.focus();
     snack("Moved to " + cellName(dst, cols));
   }
@@ -987,8 +1057,8 @@
   window.__fit = { scale: function(){ return PREVIEW_SCALE; }, apply: applyFit, chrome: measureChrome };
   window.__tabs = { show: showTab, active: function(){ return ACTIVE_TAB; } };
   window.__dates = { labels: DATE_FORMATS.map(function(f){ return f.label; }), insert: insertDate, close: closeDateMenu };
-  $("sheet").addEventListener("pointerdown", dragStart);
-  $("sheet").addEventListener("keydown", keyMove);
+  $("pageslot").addEventListener("pointerdown", dragStart);
+  $("pageslot").addEventListener("keydown", keyMove);
   $("resetLayout").addEventListener("click", function(){
     LAYOUT = null; render(); snack("Layout reset \u2014 labels are back in paste order");
   });
@@ -1041,8 +1111,9 @@
     r.readAsText(f);
     e.target.value = "";
   });
-  window.addEventListener("beforeprint", function(){ $("page").style.boxShadow = "none"; });
-  window.addEventListener("afterprint", function(){ $("page").style.boxShadow = ""; snack("Print dialog closed"); });
+  function eachPage(fn){ Array.prototype.forEach.call(document.querySelectorAll("#pageslot .page"), fn); }
+  window.addEventListener("beforeprint", function(){ eachPage(function(p){ p.style.boxShadow = "none"; }); });
+  window.addEventListener("afterprint", function(){ eachPage(function(p){ p.style.boxShadow = ""; }); snack("Print dialog closed"); });
 
   /* ---------- boot ---------- */
   loadSettings();
