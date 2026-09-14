@@ -539,10 +539,19 @@
     return s;
   }
   var fitT;
-  window.addEventListener("resize", function(){
+  function refitSoon(){
     clearTimeout(fitT);
-    fitT = setTimeout(function(){ measureChrome(); applyFit(); }, 120);
-  });
+    fitT = setTimeout(function(){ measureChrome(); applyFit(); }, 110);
+  }
+  window.addEventListener("resize", refitSoon);
+  window.addEventListener("load", refitSoon);
+  // Catch anything that changes the column's size without a window resize — a late webfont,
+  // the status bar wrapping to another line, browser zoom.
+  if (window.ResizeObserver){
+    var ro = new ResizeObserver(refitSoon);
+    ro.observe(document.querySelector(".previewwrap"));
+    ro.observe(document.querySelector(".statusbar"));
+  }
   // The status bar is sticky and still occupies layout space, so its real height is fed back
   // into the CSS that sizes the column — otherwise the document scrolls by exactly its height.
   function measureChrome(){
