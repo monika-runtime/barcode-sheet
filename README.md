@@ -10,6 +10,14 @@ no server, no uploads, no tracking. Deployed at <https://barcode.shmingus.net>.
 - Live preview of the exact page that prints
 - Print straight to a label sheet or plain paper, with cut guides
 
+## Getting around
+
+The form is tabbed — **Values**, **Barcode**, **Sheet**, **Advanced** — so only the
+section you are working in is on screen and nothing has to be scrolled into view. Each
+tab's card shows a one-line summary of the settings that live in it, and the **Advanced**
+tab carries a count of anything you have changed from its defaults, so a set-once option
+can never be left changed and forgotten.
+
 ## Adding dates
 
 **Date** inserts today's date as `YYYYMMDD` — compact, sortable, and safe for every

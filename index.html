@@ -37,6 +37,35 @@
   .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:14px; margin-bottom:14px}
   .card h2{margin:0 0 2px; font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--accent)}
   .card .hint{margin:0 0 12px; font-size:12px; color:var(--dim)}
+  .mini{margin:10px 0 0; font-size:11.5px; line-height:1.45; color:var(--dim)}
+  .mini b{color:var(--fg); font-weight:600}
+  .mini .warn{color:var(--warn)}
+
+  /* ---------- section tabs: one view at a time, so nothing needs scrolling ---------- */
+  .tabs{display:flex; gap:6px; margin-bottom:12px}
+  .tab{
+    flex:1 1 0; min-width:0; cursor:pointer; font:inherit; font-size:11.5px; letter-spacing:.04em;
+    padding:8px 4px; border-radius:8px; border:1px solid var(--line); background:var(--panel);
+    color:var(--dim); display:flex; align-items:center; justify-content:center; gap:4px;
+    transition:color .12s ease, border-color .12s ease, background .12s ease;
+  }
+  .tab:hover{background:var(--panel2); color:var(--fg)}
+  .tab[aria-selected="true"]{
+    color:var(--fg); border-color:var(--accent2); background:var(--panel2);
+    box-shadow:inset 0 -2px 0 var(--accent);
+  }
+  .tab .cnt{
+    font-size:10px; line-height:1; padding:2px 4px; border-radius:6px;
+    background:var(--accent); color:#0e1013; font-weight:700;
+  }
+  .tab .cnt:empty{display:none}
+  .view[hidden]{display:none}
+  .advbody{border-top:1px dashed var(--line); margin-top:12px; padding-top:2px}
+  .advgrp{margin-top:14px}
+  .advgrp h3{
+    margin:0 0 2px; font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim);
+    padding-bottom:6px; border-bottom:1px dashed var(--line);
+  }
   label{display:block; font-size:12px; color:var(--dim); margin:10px 0 4px}
   textarea,input,select{
     width:100%; background:var(--panel2); color:var(--fg); border:1px solid var(--line);
@@ -165,8 +194,15 @@
 <div class="layout">
   <!-- ================= FORM ================= -->
   <div class="panel">
-    <div class="card">
-      <h2>1 · Values</h2>
+    <div class="tabs" role="tablist" aria-label="Sections">
+      <button type="button" role="tab" class="tab" data-tab="values" aria-selected="true">Values</button>
+      <button type="button" role="tab" class="tab" data-tab="barcode" aria-selected="false">Barcode</button>
+      <button type="button" role="tab" class="tab" data-tab="sheet" aria-selected="false">Sheet</button>
+      <button type="button" role="tab" class="tab" data-tab="adv" aria-selected="false">Advanced<span class="cnt" id="advCount"></span></button>
+    </div>
+
+    <div class="card view" data-view="values">
+      <h2>Values</h2>
       <p class="hint">One barcode per line. Blank lines are ignored; duplicates are kept.</p>
       <textarea id="values" spellcheck="false" placeholder="ABC-1001&#10;ABC-1002&#10;012345678905&#10;WESLEY-ROSE-42"></textarea>
       <div class="btns">
@@ -184,8 +220,8 @@
       <input type="file" id="file" accept=".txt,.csv,text/plain" style="display:none">
     </div>
 
-    <div class="card">
-      <h2>2 · Barcode</h2>
+    <div class="card view" data-view="barcode" hidden>
+      <h2>Barcode</h2>
       <p class="hint">Format applies to every value on the sheet.</p>
       <label for="format">Symbology</label>
       <select id="format">
@@ -207,22 +243,11 @@
           <option value="ITF14">ITF-14 (13 or 14 digits)</option>
         </optgroup>
       </select>
-      <div class="row">
-        <div>
-          <label for="barH">Bar height (mm)</label>
-          <input type="number" id="barH" value="13" min="4" max="60" step="0.5">
-        </div>
-        <div>
-          <label for="fontSize">Text size (pt)</label>
-          <input type="number" id="fontSize" value="8" min="4" max="18" step="0.5">
-        </div>
-      </div>
-      <label class="check"><input type="checkbox" id="showText" checked> Print the number under each barcode</label>
-      <label class="check"><input type="checkbox" id="quietZone" checked> Include quiet zone (required for reliable scanning)</label>
+      <p class="mini" id="barMini"></p>
     </div>
 
-    <div class="card">
-      <h2>3 · Label sheet</h2>
+    <div class="card view" data-view="sheet" hidden>
+      <h2>Label sheet</h2>
       <p class="hint">Sizes in millimetres. Match these to your label stock, or leave as-is for plain paper.</p>
       <div class="row">
         <div>
@@ -273,9 +298,35 @@
           <input type="number" id="pad" value="2" min="0" max="20" step="0.5">
         </div>
       </div>
-      <label class="check"><input type="checkbox" id="fitCols"> Auto-fit columns to page width</label>
-      <label class="check"><input type="checkbox" id="cutlines" checked> Show cut guides</label>
-      <label class="check"><input type="checkbox" id="remember" checked> Remember these settings on this device</label>
+      <p class="mini" id="sheetMini"></p>
+    </div>
+
+    <div class="card view" data-view="adv" id="advanced" hidden>
+      <h2>Advanced</h2>
+      <p class="hint">Set-once options. The tab badge counts anything you have changed from the defaults.</p>
+      <div class="advbody">
+        <div class="advgrp">
+          <h3>Barcode rendering</h3>
+          <div class="row">
+            <div>
+              <label for="barH">Bar height (mm)</label>
+              <input type="number" id="barH" value="13" min="4" max="60" step="0.5">
+            </div>
+            <div>
+              <label for="fontSize">Text size (pt)</label>
+              <input type="number" id="fontSize" value="8" min="4" max="18" step="0.5">
+            </div>
+          </div>
+          <label class="check"><input type="checkbox" id="showText" checked> Print the number under each barcode</label>
+          <label class="check"><input type="checkbox" id="quietZone" checked> Include quiet zone (required for reliable scanning)</label>
+        </div>
+        <div class="advgrp">
+          <h3>Page &amp; printing</h3>
+          <label class="check"><input type="checkbox" id="fitCols"> Auto-fit columns to page width</label>
+          <label class="check"><input type="checkbox" id="cutlines" checked> Show cut guides</label>
+          <label class="check"><input type="checkbox" id="remember" checked> Remember these settings on this device</label>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -340,6 +391,7 @@
       o[id] = el.type === "checkbox" ? el.checked : el.value;
     });
     o.layout = LAYOUT;
+    o.tab = ACTIVE_TAB;
     try{ localStorage.setItem("barcode-sheet", JSON.stringify(o)); }catch(e){}
   }
   function loadSettings(){
@@ -354,7 +406,69 @@
       if (el.type === "checkbox") el.checked = !!o[id]; else el.value = o[id];
     });
     if (Array.isArray(o.layout)) LAYOUT = o.layout;
+    if (o.tab) showTab(o.tab);
   }
+
+  /* ---------- advanced submenu: keep the daytime controls out of sight ---------- */
+  var ADV_DEFAULTS = { barH:13, fontSize:8, showText:true, quietZone:true, fitCols:false, cutlines:true, remember:true };
+  var ADV_LABELS = { barH:"bar height", fontSize:"text size", showText:"number under bars",
+                     quietZone:"quiet zone", fitCols:"auto-fit columns", cutlines:"cut guides",
+                     remember:"remember settings" };
+  function round1(x){ return Math.round(x * 10) / 10; }
+  function advChanged(){
+    var out = [];
+    Object.keys(ADV_DEFAULTS).forEach(function(id){
+      var el = $(id);
+      var cur = el.type === "checkbox" ? el.checked : parseFloat(el.value);
+      if (cur !== ADV_DEFAULTS[id]) out.push(ADV_LABELS[id]);
+    });
+    return out;
+  }
+  // The collapsed submenu must never hide the fact that something was changed in there,
+  // and the visible cards still show what the advanced values actually are.
+  function updateChrome(){
+    var ch = advChanged();
+    $("advCount").textContent = ch.length ? String(ch.length) : "";
+    var advTab = document.querySelector('.tabs .tab[data-tab="adv"]');
+    if (advTab) advTab.title = ch.length ? "Not at default: " + ch.join(", ") : "All advanced settings are at their defaults";
+    $("barMini").textContent = "Bars " + round1(n("barH",13,4,60)) + " mm tall \u00b7 " +
+      ($("showText").checked ? round1(n("fontSize",8,4,18)) + " pt number underneath" : "no number underneath") +
+      ($("quietZone").checked ? " \u00b7 quiet zone kept clear" : " \u00b7 quiet zone suppressed");
+    var r = window.__report;
+    if (r){
+      $("sheetMini").textContent = round1(n("labelW",60,10,300)) + " \u00d7 " + round1(n("labelH",30,8,200)) +
+        " mm labels at " + round1(n("gap",4,0,40)) + " mm gap \u00b7 " + r.cols + " per row, " + r.perPage + " per page" +
+        (r.tiny ? " \u00b7 " + "\u26a0 too dense" : "");
+      $("sheetMini").className = "mini" + (r.tiny ? " warn" : "");
+    }
+  }
+
+  /* ---------- section tabs: one view at a time ---------- */
+  var ACTIVE_TAB = "values";
+  var TAB_IDS = ["values", "barcode", "sheet", "adv"];
+  function showTab(name){
+    if (TAB_IDS.indexOf(name) < 0) name = "values";
+    ACTIVE_TAB = name;
+    Array.prototype.forEach.call(document.querySelectorAll(".tabs .tab"), function(b){
+      b.setAttribute("aria-selected", String(b.getAttribute("data-tab") === name));
+    });
+    Array.prototype.forEach.call(document.querySelectorAll(".panel .view"), function(v){
+      v.hidden = v.getAttribute("data-view") !== name;
+    });
+    saveSettings();
+  }
+  Array.prototype.forEach.call(document.querySelectorAll(".tabs .tab"), function(b){
+    b.addEventListener("click", function(){ showTab(b.getAttribute("data-tab")); });
+    b.addEventListener("keydown", function(e){
+      var d = e.key === "ArrowRight" ? 1 : (e.key === "ArrowLeft" ? -1 : 0);
+      if (!d) return;
+      e.preventDefault();
+      var nx = TAB_IDS[(TAB_IDS.indexOf(ACTIVE_TAB) + d + TAB_IDS.length) % TAB_IDS.length];
+      showTab(nx);
+      var btn = document.querySelector('.tabs .tab[data-tab="' + nx + '"]');
+      if (btn && btn.focus) btn.focus();
+    });
+  });
 
   function pageDims(){
     var ps = $("pageSize").value;
@@ -531,6 +645,7 @@
     saveSettings();
     labelDateButton();
     window.__report = { total: total, ok: ok, skipped: skipped, tiny: tiny, minXmm: isFinite(minX) ? +minX.toFixed(4) : null, perPage: perPage, cols: geom.cols, slots: slots, blanks: blanks, layout: LAYOUT.slice(), custom: isCustomLayout() };
+    updateChrome();
     return window.__report;
   }
 
@@ -778,6 +893,7 @@
     if (!$("dateSplit").contains(e.target)) closeDateMenu();
   });
   document.addEventListener("keydown", function(e){ if (e.key === "Escape") closeDateMenu(); });
+  window.__tabs = { show: showTab, active: function(){ return ACTIVE_TAB; } };
   window.__dates = { labels: DATE_FORMATS.map(function(f){ return f.label; }), insert: insertDate, close: closeDateMenu };
   $("sheet").addEventListener("pointerdown", dragStart);
   $("sheet").addEventListener("keydown", keyMove);
