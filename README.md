@@ -46,6 +46,18 @@ columns, label width/height, gap between labels, and inner padding. Enabling
 Two small labels per row and a wide page is usually the fastest route to a dense sheet —
 `45 mm × 18 mm`, 4 columns fits 44 labels on Letter.
 
+## Repositioning labels
+
+Drag any label in the preview to move it; it snaps to the label grid. Dropping onto an
+occupied cell swaps the two, and dropping onto blank paper leaves a deliberately empty
+cell — which is what you want when printing onto a partly-used label sheet. Focus a label
+and use the arrow keys to make the same move without a mouse.
+
+The layout is remembered alongside the other settings. The status bar shows
+`Layout: custom` once the arrangement differs from paste order, and **Reset layout**
+returns everything to list order. Editing the values list rebuilds the layout in paste
+order, so a stale arrangement can never be printed by accident.
+
 ## Printing notes
 
 - Print at 100% / "actual size" — **not** "fit to page", or the label pitch drifts and
@@ -64,6 +76,13 @@ Two small labels per row and a wide page is usually the fastest route to a dense
 ## Local use
 
 Just open `index.html` in a browser. No build step, no dependencies to install.
+
+## Hosting note
+
+Netlify's edge injects its own HUD/badge overlay (`/.netlify/scripts/hud`) into published
+sites. The site's `hud_enabled` flag is already `false` and the overlay is injected
+anyway, so the page hides it in CSS and removes the injected nodes as they appear — see
+the final script in `index.html`. It never loads on the local file.
 
 ## License
 

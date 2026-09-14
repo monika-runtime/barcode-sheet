@@ -87,6 +87,30 @@
   .label .bad{font-size:9px; color:#b3261e; text-align:center; padding:2px; word-break:break-all}
   .label.outline{outline:1px dashed #c9d2dc; outline-offset:0}
 
+  /* ---------- drag to reposition ---------- */
+  .label{cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none}
+  .label.dragging{cursor:grabbing; opacity:.25}
+  .label:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+  .label.empty{cursor:default; background:transparent; outline:1px dashed #dbe2ea}
+  #drophint{
+    position:absolute; display:none; border:2px dashed var(--accent2); border-radius:4px;
+    background:rgba(74,157,122,.12); pointer-events:none; z-index:6;
+  }
+  #drophint.on{display:block}
+  #ghost{
+    position:fixed; display:none; pointer-events:none; z-index:80; left:0; top:0;
+    background:#fff; border-radius:3px; box-shadow:0 12px 34px rgba(0,0,0,.6);
+    transform:translate(-50%,-50%) rotate(-1.5deg); opacity:.96;
+  }
+  #ghost.on{display:block}
+
+  /* ---------- Netlify HUD / badge ---------- */
+  /* Netlify's edge injects its own overlay (/.netlify/scripts/hud) into published sites.
+     It is decoration and not part of this app, so it is hidden immediately and removed
+     by the script at the end of the body. */
+  #nl-hud-frame,#nl-badge,#nl-badge-frame,#nl-pop,#nl-card,#nl-tools,#nl-mini,#nl-tip,
+  iframe[id^="nl-"]{display:none !important; visibility:hidden !important}
+
   /* ---------- snackbar ---------- */
   #snack{
     position:fixed; left:50%; bottom:22px; transform:translate(-50%,20px);
@@ -101,12 +125,13 @@
   @page{ size:letter; margin:10mm; }
   @media print{
     html,body{background:#fff !important; color:#000}
-    header,.panel,.previewwrap .previewlabel,.statusbar,#snack{display:none !important}
+    header,.panel,.previewwrap .previewlabel,.statusbar,#snack,#ghost,#drophint{display:none !important}
     .layout{display:block; min-height:0}
     .previewwrap{padding:0; background:#fff; max-height:none; overflow:visible}
     .page{box-shadow:none; margin:0; width:auto !important; height:auto !important; padding:0 !important; overflow:visible}
     .label{outline:none !important}
     .label.outline{outline:1px dashed #ddd !important}
+    .label.empty{visibility:hidden; outline:none !important}
     .sheet{display:grid !important; gap:var(--gap-mm,6mm) !important}
     *{ -webkit-print-color-adjust:exact; print-color-adjust:exact }
   }
@@ -231,10 +256,10 @@
   <!-- ================= PREVIEW ================= -->
   <div class="previewwrap">
     <div class="previewlabel">
-      <span>Preview — this is exactly what prints</span>
+      <span>Preview — drag a barcode to move it (snaps to the grid) · this is exactly what prints</span>
       <span id="pages"></span>
     </div>
-    <div class="page" id="page"><div class="sheet" id="sheet"></div></div>
+    <div class="page" id="page"><div class="sheet" id="sheet"></div><div id="drophint"></div></div>
   </div>
 </div>
 
@@ -244,11 +269,14 @@
   <span class="stat" id="stSkipWrap">Skipped: <b id="stSkip">0</b></span>
   <span class="stat" id="stXWrap">Bar width: <b id="stX">—</b></span>
   <span class="stat">Labels/page: <b id="stPerPage">0</b></span>
+  <span class="stat" id="stLayoutWrap">Layout: <b id="stLayout">paste order</b></span>
   <span class="spacer"></span>
+  <button class="ghost" id="resetLayout" disabled>Reset layout</button>
   <button class="ghost" id="regen">Regenerate</button>
   <button class="primary" id="print">Print sheet</button>
 </div>
 
+<div id="ghost"></div>
 <div id="snack"></div>
 
 <script>
@@ -257,6 +285,9 @@
   var MM = 96 / 25.4;            // css px per mm
   var PAGES = { letter:[215.9,279.4], a4:[210,297], a5:[148,210] };
   var $ = function(id){ return document.getElementById(id); };
+  var LAYOUT = null;      // LAYOUT[slot] = index into vals, or null for a deliberately blank cell
+  var LASTCOUNT = -1;     // value count the current LAYOUT was built for
+  var NODES = [];         // one rendered label node per value
   var snackT;
   function snack(msg, isErr){
     var el = $("snack");
@@ -282,6 +313,7 @@
       var el = $(id);
       o[id] = el.type === "checkbox" ? el.checked : el.value;
     });
+    o.layout = LAYOUT;
     try{ localStorage.setItem("barcode-sheet", JSON.stringify(o)); }catch(e){}
   }
   function loadSettings(){
@@ -295,6 +327,7 @@
       var el = $(id);
       if (el.type === "checkbox") el.checked = !!o[id]; else el.value = o[id];
     });
+    if (Array.isArray(o.layout)) LAYOUT = o.layout;
   }
 
   function pageDims(){
@@ -342,6 +375,15 @@
     var geom = setPageStyle();
     var sheet = $("sheet");
     sheet.innerHTML = "";
+    NODES = [];
+    // The layout rebuilds itself in paste order whenever the number of values changes, so
+    // editing the list can never leave a stale arrangement behind.
+    if (LASTCOUNT >= 0 && LASTCOUNT !== vals.length) LAYOUT = null;
+    if (!LAYOUT || !LAYOUT.length) LAYOUT = vals.map(function(_, i){ return i; });
+    LAYOUT = LAYOUT.filter(function(vi){ return vi == null || (vi >= 0 && vi < vals.length); });
+    if (!LAYOUT.length) LAYOUT = vals.map(function(_, i){ return i; });
+    while (LAYOUT.length > vals.length && LAYOUT[LAYOUT.length - 1] == null) LAYOUT.pop();
+    LASTCOUNT = vals.length;
 
     var innerWpx = Math.max(10, (lw - 2*padmm) * MM);
     var innerHpx = Math.max(10, (lh - 2*padmm) * MM);
@@ -353,6 +395,8 @@
       $("stValues").textContent = 0; $("stCodes").textContent = 0;
       $("stSkip").textContent = 0; $("stPerPage").textContent = 0;
       $("pages").textContent = "";
+      LAYOUT = null; LASTCOUNT = -1; NODES = [];
+      updateLayoutStat();
       snack("Nothing to generate yet — paste some values", true);
       return;
     }
@@ -360,13 +404,15 @@
     vals.forEach(function(v){
       var div = document.createElement("div");
       div.className = "label" + ($("cutlines").checked ? " outline" : "");
+      div.tabIndex = 0;
+      div.title = "Drag to move this barcode \u00b7 or focus it and use the arrow keys";
       div.style.width = lw + "mm";
       div.style.height = lh + "mm";
       div.style.padding = padmm + "mm";
 
       var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       div.appendChild(svg);
-      sheet.appendChild(div);
+      NODES.push(div);
 
       try{
         // pass 1: measure module count (width=1, no margin, no text -> width attr == module count)
@@ -414,15 +460,18 @@
       }
     });
 
+    paint();
     var perPage = geom.cols * Math.max(1, Math.floor((geom.usableH + n("gap",4,0,40)) / (lh + n("gap",4,0,40))));
     var total = vals.length;
-    var pages = Math.max(1, Math.ceil(total / perPage));
+    var slots = LAYOUT.length;
+    var blanks = LAYOUT.filter(function(v){ return v == null; }).length;
+    var pages = Math.max(1, Math.ceil(slots / perPage));
     $("stValues").textContent = total;
     $("stCodes").textContent = ok;
     $("stSkip").textContent = skipped.length;
     $("stSkipWrap").className = "stat" + (skipped.length ? " bad" : "");
     $("stPerPage").textContent = geom.cols + " × " + Math.max(1, Math.floor(perPage/geom.cols)) + " = " + perPage;
-    $("pages").textContent = total + " label" + (total===1?"":"s") + " · " + pages + " page" + (pages===1?"":"s");
+    $("pages").textContent = total + " label" + (total===1?"":"s") + " \u00b7 " + pages + " page" + (pages===1?"":"s") + (blanks ? " \u00b7 " + blanks + " blank cell" + (blanks===1?"":"s") : "");
     $("stSkipWrap").title = skipped.slice(0,12).join(", ");
     if (isFinite(minX)){
       $("stX").textContent = minX.toFixed(2) + " mm";
@@ -432,8 +481,153 @@
       $("stX").textContent = "—"; $("stXWrap").className = "stat"; $("stXWrap").title = "";
     }
     saveSettings();
-    window.__report = { total: total, ok: ok, skipped: skipped, tiny: tiny, minXmm: isFinite(minX) ? +minX.toFixed(4) : null, perPage: perPage, cols: geom.cols };
+    window.__report = { total: total, ok: ok, skipped: skipped, tiny: tiny, minXmm: isFinite(minX) ? +minX.toFixed(4) : null, perPage: perPage, cols: geom.cols, slots: slots, blanks: blanks, layout: LAYOUT.slice(), custom: isCustomLayout() };
     return window.__report;
+  }
+
+  /* ---------- sheet layout: drag to reposition, snapping to the grid ---------- */
+  function emptyCell(lw, lh, padmm){
+    var d = document.createElement("div");
+    d.className = "label empty" + ($("cutlines").checked ? " outline" : "");
+    d.style.width = lw + "mm"; d.style.height = lh + "mm"; d.style.padding = padmm + "mm";
+    return d;
+  }
+  function paint(){
+    var lw = n("labelW",60,10,300), lh = n("labelH",30,8,200), padmm = n("pad",2,0,20);
+    var sheet = $("sheet");
+    sheet.innerHTML = "";
+    for (var i = 0; i < LAYOUT.length; i++){
+      var vi = LAYOUT[i];
+      if (vi == null || !NODES[vi]) sheet.appendChild(emptyCell(lw, lh, padmm));
+      else sheet.appendChild(NODES[vi]);
+    }
+    updateLayoutStat();
+    // keep the machine-readable report in step with the DOM (external checks read window.__report)
+    if (window.__report){
+      window.__report.layout = LAYOUT.slice();
+      window.__report.slots = LAYOUT.length;
+      window.__report.blanks = LAYOUT.filter(function(v){ return v == null; }).length;
+      window.__report.custom = isCustomLayout();
+    }
+  }
+  function isCustomLayout(){
+    for (var i = 0; i < LAYOUT.length; i++){ if (LAYOUT[i] !== i) return true; }
+    return false;
+  }
+  function updateLayoutStat(){
+    var custom = isCustomLayout(), moved = 0;
+    for (var i = 0; i < LAYOUT.length; i++){ if (LAYOUT[i] !== i) moved++; }
+    $("stLayout").textContent = custom ? "custom" : "paste order";
+    $("stLayoutWrap").className = "stat" + (custom ? "" : "");
+    $("stLayoutWrap").title = custom
+      ? moved + " cell(s) moved or left blank \u2014 drag a barcode to change it, or press Reset layout"
+      : "Labels follow the order of the values list";
+    $("resetLayout").disabled = !custom;
+  }
+  function slotOf(node){
+    for (var i = 0; i < LAYOUT.length; i++){ if (LAYOUT[i] != null && NODES[LAYOUT[i]] === node) return i; }
+    return -1;
+  }
+  function geomOf(){
+    var first = $("sheet").children[0];
+    if (!first) return null;
+    var r = first.getBoundingClientRect();
+    var cols = Math.round(n("cols",3,1,8)), gap = n("gap",4,0,40);
+    var d = pageDims(), m = n("margin",10,0,40), lh = n("labelH",30,8,200);
+    var rows = Math.max(1, Math.floor((d[1] - 2*m + gap) / (lh + gap)));
+    return { x0:r.left, y0:r.top, w:r.width, h:r.height, gap:gap*MM, cols:cols, rows:rows };
+  }
+  function cellAt(g, x, y){
+    // pure geometry, so the snap target is the nearest printed cell no matter what is under the cursor
+    var col = Math.floor((x - g.x0) / (g.w + g.gap));
+    var row = Math.floor((y - g.y0) / (g.h + g.gap));
+    col = Math.max(0, Math.min(g.cols - 1, col));
+    row = Math.max(0, Math.min(g.rows - 1, row));
+    return { col: col, row: row, slot: row*g.cols + col };
+  }
+  function showHint(g, c){
+    var hint = $("drophint"), pr = $("page").getBoundingClientRect();
+    hint.style.left = (g.x0 + c.col*(g.w + g.gap) - pr.left) + "px";
+    hint.style.top  = (g.y0 + c.row*(g.h + g.gap) - pr.top) + "px";
+    hint.style.width = g.w + "px";
+    hint.style.height = g.h + "px";
+    hint.className = "on";
+  }
+  function hideDragUI(){
+    $("drophint").className = "";
+    var gh = $("ghost"); gh.className = ""; gh.innerHTML = "";
+  }
+  function cellName(slot, cols){
+    return "row " + (Math.floor(slot / cols) + 1) + ", column " + (slot % cols + 1);
+  }
+  function moveSlot(src, dst){
+    if (src < 0 || dst < 0 || src === dst) return false;
+    while (LAYOUT.length <= dst) LAYOUT.push(null);
+    var vi = LAYOUT[src], other = LAYOUT[dst];
+    LAYOUT[dst] = vi;
+    LAYOUT[src] = (other == null) ? null : other;   // empty target -> the source becomes a blank cell
+    while (LAYOUT.length - 1 > 0 && LAYOUT[LAYOUT.length - 1] == null) LAYOUT.pop();
+    paint(); saveSettings();
+    return true;
+  }
+  var DRAG = null;
+  function dragStart(e){
+    var cell = e.target && e.target.closest ? e.target.closest(".label") : null;
+    if (!cell || cell.classList.contains("empty")) return;
+    if (e.button != null && e.button > 0) return;
+    var src = slotOf(cell), g = geomOf();
+    if (src < 0 || !g) return;
+    DRAG = { node: cell, src: src, x: e.clientX, y: e.clientY, g: g, live: false, target: null };
+    window.addEventListener("pointermove", dragMove);
+    window.addEventListener("pointerup", dragEnd);
+    window.addEventListener("pointercancel", dragEnd);
+    e.preventDefault();
+  }
+  function dragMove(e){
+    if (!DRAG) return;
+    if (!DRAG.live){
+      // small threshold so a click that wobbles by a pixel doesn't count as a drag
+      if (Math.abs(e.clientX - DRAG.x) + Math.abs(e.clientY - DRAG.y) < 4) return;
+      DRAG.live = true;
+      DRAG.node.classList.add("dragging");
+      var gh = $("ghost"), c = DRAG.node.cloneNode(true);
+      c.classList.remove("dragging");
+      c.removeAttribute("tabindex");
+      gh.innerHTML = ""; gh.appendChild(c); gh.className = "on";
+    }
+    var g = $("ghost");
+    g.style.left = e.clientX + "px";
+    g.style.top = e.clientY + "px";
+    var cell = cellAt(DRAG.g, e.clientX, e.clientY);
+    DRAG.target = cell.slot;
+    showHint(DRAG.g, cell);
+  }
+  function dragEnd(){
+    window.removeEventListener("pointermove", dragMove);
+    window.removeEventListener("pointerup", dragEnd);
+    window.removeEventListener("pointercancel", dragEnd);
+    if (!DRAG) return;
+    var d = DRAG; DRAG = null;
+    d.node.classList.remove("dragging");
+    hideDragUI();
+    if (!d.live || d.target == null) return;
+    if (moveSlot(d.src, d.target)) snack("Moved to " + cellName(d.target, d.g.cols));
+  }
+  function keyMove(e){
+    var cell = e.target && e.target.closest ? e.target.closest(".label") : null;
+    if (!cell || cell.classList.contains("empty")) return;
+    var src = slotOf(cell); if (src < 0) return;
+    var cols = Math.round(n("cols",3,1,8));
+    var d = { ArrowLeft:[0,-1], ArrowRight:[0,1], ArrowUp:[-1,0], ArrowDown:[1,0] }[e.key];
+    if (!d) return;
+    e.preventDefault();
+    var row = Math.floor(src / cols), col = src % cols;
+    var nrow = Math.max(0, row + d[0]), ncol = Math.max(0, Math.min(cols - 1, col + d[1]));
+    var dst = nrow*cols + ncol;
+    if (!moveSlot(src, dst)) return;
+    var nx = $("sheet").children[dst];
+    if (nx && nx.focus) nx.focus();
+    snack("Moved to " + cellName(dst, cols));
   }
 
   /* ---------- events ---------- */
@@ -453,6 +647,11 @@
   });
   function toggleCustom(){ $("customsize").style.display = $("pageSize").value === "custom" ? "" : "none"; }
 
+  $("sheet").addEventListener("pointerdown", dragStart);
+  $("sheet").addEventListener("keydown", keyMove);
+  $("resetLayout").addEventListener("click", function(){
+    LAYOUT = null; render(); snack("Layout reset \u2014 labels are back in paste order");
+  });
   $("regen").addEventListener("click", function(){ render(); snack("Regenerated " + $("stCodes").textContent + " barcodes"); });
   $("print").addEventListener("click", function(){
     if (document.querySelector(".label svg") === null){ snack("Nothing to print — add values first", true); return; }
@@ -510,6 +709,37 @@
   toggleCustom();
   if (!$("values").value) $("values").value = ["WESLEY-1001","WESLEY-1002","WESLEY-1003","SHMINGUS-A","SHMINGUS-B","TWR-42"].join("\n");
   render();
+})();
+</script>
+
+<script>
+/* Strip the Netlify HUD/badge overlay. Netlify injects <script src="/.netlify/scripts/hud">
+   into published sites; it renders a fixed-position iframe badge. CSS above hides it on the
+   first paint, and this removes the nodes as they appear. Bounded, so it cannot spin. */
+(function(){
+  var SEL = '#nl-hud-frame,#nl-badge,#nl-badge-frame,#nl-pop,#nl-card,#nl-tools,#nl-mini,#nl-tip,iframe[id^="nl-"]';
+  var hits = 0;
+  function strip(){
+    var nodes = document.querySelectorAll(SEL), n = 0;
+    for (var i = 0; i < nodes.length; i++){
+      if (nodes[i].parentNode){ nodes[i].parentNode.removeChild(nodes[i]); n++; }
+    }
+    return n;
+  }
+  function sweep(){ if (strip()) hits++; if (hits > 25) stop(); }
+  var obs = null, timer = null;
+  function stop(){
+    if (obs){ try{ obs.disconnect(); }catch(e){} obs = null; }
+    if (timer){ clearInterval(timer); timer = null; }
+  }
+  strip();
+  try{
+    obs = new MutationObserver(function(){ strip(); });
+    obs.observe(document.documentElement, {childList:true});
+    obs.observe(document.body, {childList:true});
+  }catch(e){}
+  timer = setInterval(sweep, 400);
+  setTimeout(stop, 12000);
 })();
 </script>
 </body>
