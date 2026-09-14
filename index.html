@@ -25,13 +25,13 @@
   }
   header h1{margin:0; font-size:17px; letter-spacing:.2px}
   header .sub{color:var(--dim); font-size:12.5px}
-  .layout{display:grid; grid-template-columns:380px 1fr; gap:0; min-height:calc(100vh - 63px)}
+  .layout{display:grid; grid-template-columns:380px 1fr; gap:0; min-height:calc(100vh - 63px - var(--sb-h,56px))}
   @media (max-width:1000px){ .layout{grid-template-columns:1fr} }
 
   /* ---------- form panel ---------- */
   .panel{
     border-right:1px solid var(--line); padding:16px; overflow-y:auto;
-    max-height:calc(100vh - 63px); background:var(--bg);
+    max-height:calc(100vh - 63px - var(--sb-h,56px)); background:var(--bg);
   }
   @media (max-width:1000px){ .panel{border-right:0; border-bottom:1px solid var(--line); max-height:none} }
   .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:14px; margin-bottom:14px}
@@ -118,11 +118,25 @@
   .statusbar .spacer{flex:1}
 
   /* ---------- preview ---------- */
-  .previewwrap{padding:18px; background:#0b0d10; overflow:auto; max-height:calc(100vh - 63px)}
-  @media (max-width:1000px){ .previewwrap{max-height:none} }
-  .previewlabel{font-size:12px; color:var(--dim); margin:0 0 10px; display:flex; justify-content:space-between}
+  /* no scrollbars: the page is scaled to fit, so there is nothing to scroll to. The soft
+     drop shadow is drawn outside the page box and would otherwise reserve a scrollbar. */
+  .previewwrap{padding:18px; background:#0b0d10; overflow:hidden; height:calc(100vh - 63px - var(--sb-h,56px))}
+  @media (max-width:1000px){ .previewwrap{height:auto; max-height:none; overflow:auto} }
+  .previewlabel{
+    font-size:12px; color:var(--dim); margin:0 0 10px;
+    display:flex; justify-content:space-between; gap:12px; align-items:baseline;
+  }
+  .previewlabel>span:first-child{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .previewlabel .zoom{
+    color:var(--accent); font-size:11px; letter-spacing:.04em; white-space:nowrap;
+    border:1px solid var(--line); border-radius:6px; padding:1px 6px;
+  }
+  .previewlabel .zoom:empty{display:none}
+  /* the page is scaled with a transform, so the slot above it collapses to the scaled height
+     and the wrapper never needs to scroll */
+  .pageslot{width:100%}
   .page{
-    background:#fff; margin:0 auto 18px; box-shadow:0 6px 26px rgba(0,0,0,.5);
+    background:#fff; margin:0 0 18px; box-shadow:0 6px 26px rgba(0,0,0,.5);
     position:relative; overflow:hidden;
   }
   .sheet{display:grid}
@@ -148,7 +162,7 @@
   #ghost{
     position:fixed; display:none; pointer-events:none; z-index:80; left:0; top:0;
     background:#fff; border-radius:3px; box-shadow:0 12px 34px rgba(0,0,0,.6);
-    transform:translate(-50%,-50%) rotate(-1.5deg); opacity:.96;
+    transform:translate(-50%,-50%) rotate(-1.5deg) scale(var(--s,1)); opacity:.96;
   }
   #ghost.on{display:block}
 
@@ -175,8 +189,9 @@
     html,body{background:#fff !important; color:#000}
     header,.panel,.previewwrap .previewlabel,.statusbar,#snack,#ghost,#drophint{display:none !important}
     .layout{display:block; min-height:0}
-    .previewwrap{padding:0; background:#fff; max-height:none; overflow:visible}
-    .page{box-shadow:none; margin:0; width:auto !important; height:auto !important; padding:0 !important; overflow:visible}
+    .previewwrap{padding:0; background:#fff; max-height:none; height:auto; overflow:visible}
+    .pageslot{height:auto !important; overflow:visible}
+    .page{box-shadow:none; margin:0; width:auto !important; height:auto !important; padding:0 !important; overflow:visible; transform:none !important}
     .label{outline:none !important}
     .label.outline{outline:1px dashed #ddd !important}
     .label.empty{visibility:hidden; outline:none !important}
@@ -334,9 +349,10 @@
   <div class="previewwrap">
     <div class="previewlabel">
       <span>Preview — drag a barcode to move it (snaps to the grid) · this is exactly what prints</span>
+      <span class="zoom" id="zoomNote" title="The preview is scaled to fit your window. Printing is always full size."></span>
       <span id="pages"></span>
     </div>
-    <div class="page" id="page"><div class="sheet" id="sheet"></div><div id="drophint"></div></div>
+    <div class="pageslot" id="pageslot"><div class="page" id="page"><div class="sheet" id="sheet"></div><div id="drophint"></div></div></div>
   </div>
 </div>
 
@@ -476,6 +492,64 @@
     return PAGES[ps] || PAGES.letter;
   }
 
+  /* ---------- preview zoom: the whole page, always on screen ---------- */
+  var PREVIEW_SCALE = 1;
+  function fitPreview(d){
+    var wrap = document.querySelector(".previewwrap");
+    var lab = document.querySelector(".previewlabel");
+    if (!wrap) return 1;
+    var cs = getComputedStyle(wrap);
+    var padX = parseFloat(cs.paddingLeft || 0) + parseFloat(cs.paddingRight || 0);
+    var padY = parseFloat(cs.paddingTop || 0) + parseFloat(cs.paddingBottom || 0);
+    var availW = (wrap.clientWidth || window.innerWidth) - padX;
+    var labBlock = 0;
+    if (lab){
+      labBlock = lab.getBoundingClientRect().height + (parseFloat(getComputedStyle(lab).marginBottom) || 0);
+    }
+    // The wrapper has a definite height on desktop, so measure it directly — exactly, with no
+    // slack left over to scroll. Where its height is auto (narrow screens) it hugs its content
+    // and would feed the scale back into itself, so fall back to the viewport there.
+    // Stacked (narrow) layout: the preview sits under the form and is scrolled to anyway, so
+    // only the width constrains it — fitting the height there would make the page unreadably small.
+    var availH = cs.height === "auto" ? Infinity : wrap.clientHeight - padY - labBlock;
+    if (!(availW > 40) || !(availH > 40)) return 1;
+    return Math.max(0.15, Math.min(1, availW / (d[0] * MM), availH / (d[1] * MM)));
+  }
+  // Scaling is a CSS transform, so the barcodes themselves keep rendering at true size and
+  // only the on-screen view shrinks. Printing resets the transform, so paper is untouched.
+  function applyFit(d){
+    var pg = $("page"), slot = $("pageslot");
+    if (!pg || !slot) return 1;
+    measureChrome();   // the bar's real height sizes the column this fit is measured against
+    d = d || pageDims();
+    var s = fitPreview(d);
+    PREVIEW_SCALE = s;
+    // Explicit translate+scale from the top-left corner: an auto-margin centred box that is
+    // wider than its container does not stay centred once a transform is applied to it.
+    var scaledW = d[0] * MM * s;
+    var dx = Math.max(0, Math.round((slot.clientWidth - scaledW) / 2));
+    pg.style.transformOrigin = "top left";
+    pg.style.transform = s < 0.999
+      ? "translateX(" + dx + "px) scale(" + s + ")"
+      : (dx ? "translateX(" + dx + "px)" : "none");
+    pg.style.marginBottom = "0px";   // the slot already accounts for the scaled height
+    slot.style.height = Math.round(d[1] * MM * s) + "px";
+    var z = $("zoomNote");
+    if (z) z.textContent = s < 0.999 ? "fit " + Math.round(s * 100) + "%" : "full size";
+    return s;
+  }
+  var fitT;
+  window.addEventListener("resize", function(){
+    clearTimeout(fitT);
+    fitT = setTimeout(function(){ measureChrome(); applyFit(); }, 120);
+  });
+  // The status bar is sticky and still occupies layout space, so its real height is fed back
+  // into the CSS that sizes the column — otherwise the document scrolls by exactly its height.
+  function measureChrome(){
+    var sb = document.querySelector(".statusbar");
+    if (sb) document.documentElement.style.setProperty("--sb-h", sb.offsetHeight + "px");
+  }
+
   function setPageStyle(){
     var d = pageDims(), m = n("margin",10,0,40), gap = n("gap",4,0,40);
     var css = "@page{ size:" + (d[0]/25.4).toFixed(3) + "in " + (d[1]/25.4).toFixed(3) + "in; margin:" + m + "mm; }";
@@ -500,6 +574,7 @@
     sh.style.gap = gap + "mm";
     sh.style.justifyContent = "center";
     sh.style.setProperty("--gap-mm", gap + "mm");
+    applyFit(d);
     return { cols: cols, usableW: usableW, usableH: usableH };
   }
 
@@ -646,6 +721,9 @@
     labelDateButton();
     window.__report = { total: total, ok: ok, skipped: skipped, tiny: tiny, minXmm: isFinite(minX) ? +minX.toFixed(4) : null, perPage: perPage, cols: geom.cols, slots: slots, blanks: blanks, layout: LAYOUT.slice(), custom: isCustomLayout() };
     updateChrome();
+    // The status bar can wrap to another line once these numbers are written, and it is what
+    // sizes the column the preview is fitted into — so fit once more, now that it is settled.
+    applyFit();
     return window.__report;
   }
 
@@ -766,7 +844,8 @@
     var cols = Math.round(n("cols",3,1,8)), gap = n("gap",4,0,40);
     var d = pageDims(), m = n("margin",10,0,40), lh = n("labelH",30,8,200);
     var rows = Math.max(1, Math.floor((d[1] - 2*m + gap) / (lh + gap)));
-    return { x0:r.left, y0:r.top, w:r.width, h:r.height, gap:gap*MM, cols:cols, rows:rows };
+    return { x0:r.left, y0:r.top, w:r.width, h:r.height, gap:gap*MM*PREVIEW_SCALE,
+             cols:cols, rows:rows, scale:PREVIEW_SCALE };
   }
   function cellAt(g, x, y){
     // pure geometry, so the snap target is the nearest printed cell no matter what is under the cursor
@@ -778,10 +857,12 @@
   }
   function showHint(g, c){
     var hint = $("drophint"), pr = $("page").getBoundingClientRect();
-    hint.style.left = (g.x0 + c.col*(g.w + g.gap) - pr.left) + "px";
-    hint.style.top  = (g.y0 + c.row*(g.h + g.gap) - pr.top) + "px";
-    hint.style.width = g.w + "px";
-    hint.style.height = g.h + "px";
+    // the hint lives inside the scaled page, so screen distances are divided back out
+    var s = g.scale || 1;
+    hint.style.left = ((g.x0 + c.col*(g.w + g.gap) - pr.left) / s) + "px";
+    hint.style.top  = ((g.y0 + c.row*(g.h + g.gap) - pr.top) / s) + "px";
+    hint.style.width = (g.w / s) + "px";
+    hint.style.height = (g.h / s) + "px";
     hint.className = "on";
   }
   function hideDragUI(){
@@ -827,6 +908,7 @@
       gh.innerHTML = ""; gh.appendChild(c); gh.className = "on";
     }
     var g = $("ghost");
+    g.style.setProperty("--s", PREVIEW_SCALE);
     g.style.left = e.clientX + "px";
     g.style.top = e.clientY + "px";
     var cell = cellAt(DRAG.g, e.clientX, e.clientY);
@@ -893,6 +975,7 @@
     if (!$("dateSplit").contains(e.target)) closeDateMenu();
   });
   document.addEventListener("keydown", function(e){ if (e.key === "Escape") closeDateMenu(); });
+  window.__fit = { scale: function(){ return PREVIEW_SCALE; }, apply: applyFit, chrome: measureChrome };
   window.__tabs = { show: showTab, active: function(){ return ACTIVE_TAB; } };
   window.__dates = { labels: DATE_FORMATS.map(function(f){ return f.label; }), insert: insertDate, close: closeDateMenu };
   $("sheet").addEventListener("pointerdown", dragStart);

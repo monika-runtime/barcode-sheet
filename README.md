@@ -18,6 +18,11 @@ tab's card shows a one-line summary of the settings that live in it, and the **A
 tab carries a count of anything you have changed from its defaults, so a set-once option
 can never be left changed and forgotten.
 
+The paper itself is scaled to fit your window, so the whole page is on screen at once — no
+scrolling. The scale shows next to the preview (`fit 67%`, or `full size` when it fits 1:1).
+This is a screen-only transform: the barcodes are still rendered at true size and printing
+is always full size, so never judge a barcode by how it looks on screen.
+
 ## Adding dates
 
 **Date** inserts today's date as `YYYYMMDD` — compact, sortable, and safe for every
