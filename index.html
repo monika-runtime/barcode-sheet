@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Barcode Sheet Generator</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230f1115'/><g fill='%23fff'><rect x='6' y='7' width='2' height='18'/><rect x='10' y='7' width='1' height='18'/><rect x='13' y='7' width='3' height='18'/><rect x='18' y='7' width='1' height='18'/><rect x='21' y='7' width='2' height='18'/><rect x='25' y='7' width='1' height='18'/></g></svg>">
+<script src="jsbarcode.min.js"></script>
+<style>
+  :root{
+    --bg:#0e1013; --panel:#161a20; --panel2:#1c2129; --line:#2a323d;
+    --fg:#e8edf3; --dim:#94a3b4; --accent:#7dd3a0; --accent2:#4a9d7a;
+    --warn:#e2b04a; --err:#e06c6c; --radius:12px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--fg); font:14px/1.5 ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent)}
+  header{
+    padding:18px 22px 14px; border-bottom:1px solid var(--line); background:var(--panel);
+    display:flex; align-items:baseline; gap:12px; flex-wrap:wrap;
+  }
+  header h1{margin:0; font-size:17px; letter-spacing:.2px}
+  header .sub{color:var(--dim); font-size:12.5px}
+  .layout{display:grid; grid-template-columns:380px 1fr; gap:0; min-height:calc(100vh - 63px)}
+  @media (max-width:1000px){ .layout{grid-template-columns:1fr} }
+
+  /* ---------- form panel ---------- */
+  .panel{
+    border-right:1px solid var(--line); padding:16px; overflow-y:auto;
+    max-height:calc(100vh - 63px); background:var(--bg);
+  }
+  @media (max-width:1000px){ .panel{border-right:0; border-bottom:1px solid var(--line); max-height:none} }
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:14px; margin-bottom:14px}
+  .card h2{margin:0 0 2px; font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--accent)}
+  .card .hint{margin:0 0 12px; font-size:12px; color:var(--dim)}
+  label{display:block; font-size:12px; color:var(--dim); margin:10px 0 4px}
+  textarea,input,select{
+    width:100%; background:var(--panel2); color:var(--fg); border:1px solid var(--line);
+    border-radius:8px; padding:9px 10px; font:inherit; font-size:13px; outline:none;
+  }
+  textarea{min-height:190px; resize:vertical; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px; line-height:1.55}
+  input:focus,select:focus,textarea:focus{border-color:var(--accent2); box-shadow:0 0 0 3px rgba(74,157,122,.15)}
+  .row{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+  .row.three{grid-template-columns:1fr 1fr 1fr}
+  .check{display:flex; align-items:center; gap:8px; margin:10px 0 0; color:var(--fg); font-size:13px}
+  .check input{width:auto; margin:0}
+  .btns{display:flex; gap:8px; flex-wrap:wrap; margin-top:12px}
+  button{
+    background:var(--panel2); color:var(--fg); border:1px solid var(--line); border-radius:9px;
+    padding:9px 14px; font:inherit; font-size:13px; cursor:pointer; transition:.12s;
+  }
+  button:hover{border-color:var(--accent2); color:#fff}
+  button.primary{background:var(--accent2); border-color:var(--accent2); color:#04150e; font-weight:600}
+  button.primary:hover{background:var(--accent); border-color:var(--accent)}
+  button.ghost{background:transparent}
+  button:disabled{opacity:.45; cursor:not-allowed}
+
+  /* ---------- status bar ---------- */
+  .statusbar{
+    position:sticky; bottom:0; background:var(--panel); border-top:1px solid var(--line);
+    display:flex; align-items:center; gap:14px; padding:10px 16px; flex-wrap:wrap;
+  }
+  .statusbar .stat{font-size:12.5px; color:var(--dim)}
+  .statusbar .stat b{color:var(--fg); font-weight:600}
+  .statusbar .stat.bad b{color:var(--err)}
+  .statusbar .spacer{flex:1}
+
+  /* ---------- preview ---------- */
+  .previewwrap{padding:18px; background:#0b0d10; overflow:auto; max-height:calc(100vh - 63px)}
+  @media (max-width:1000px){ .previewwrap{max-height:none} }
+  .previewlabel{font-size:12px; color:var(--dim); margin:0 0 10px; display:flex; justify-content:space-between}
+  .page{
+    background:#fff; margin:0 auto 18px; box-shadow:0 6px 26px rgba(0,0,0,.5);
+    position:relative; overflow:hidden;
+  }
+  .sheet{display:grid}
+  .label{
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    overflow:hidden; color:#000; background:#fff;
+    break-inside:avoid; page-break-inside:avoid;
+  }
+  .label svg{display:block; max-width:100%}
+  .label .bad{font-size:9px; color:#b3261e; text-align:center; padding:2px; word-break:break-all}
+  .label.outline{outline:1px dashed #c9d2dc; outline-offset:0}
+
+  /* ---------- snackbar ---------- */
+  #snack{
+    position:fixed; left:50%; bottom:22px; transform:translate(-50%,20px);
+    background:#222b36; color:#fff; border:1px solid #33404f; border-radius:10px;
+    padding:10px 16px; font-size:13px; box-shadow:0 8px 30px rgba(0,0,0,.5);
+    opacity:0; pointer-events:none; transition:.18s; z-index:99; max-width:80vw;
+  }
+  #snack.show{opacity:1; transform:translate(-50%,0)}
+  #snack.err{background:#3a1f22; border-color:#6b3037}
+
+  /* ---------- print ---------- */
+  @page{ size:letter; margin:10mm; }
+  @media print{
+    html,body{background:#fff !important; color:#000}
+    header,.panel,.previewwrap .previewlabel,.statusbar,#snack{display:none !important}
+    .layout{display:block; min-height:0}
+    .previewwrap{padding:0; background:#fff; max-height:none; overflow:visible}
+    .page{box-shadow:none; margin:0; width:auto !important; height:auto !important; padding:0 !important; overflow:visible}
+    .label{outline:none !important}
+    .label.outline{outline:1px dashed #ddd !important}
+    .sheet{display:grid !important; gap:var(--gap-mm,6mm) !important}
+    *{ -webkit-print-color-adjust:exact; print-color-adjust:exact }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Barcode Sheet Generator</h1>
+  <span class="sub">paste values → print a sheet · runs entirely in your browser, nothing is uploaded</span>
+</header>
+
+<div class="layout">
+  <!-- ================= FORM ================= -->
+  <div class="panel">
+    <div class="card">
+      <h2>1 · Values</h2>
+      <p class="hint">One barcode per line. Blank lines are ignored; duplicates are kept.</p>
+      <textarea id="values" spellcheck="false" placeholder="ABC-1001&#10;ABC-1002&#10;012345678905&#10;WESLEY-ROSE-42"></textarea>
+      <div class="btns">
+        <button class="ghost" id="loadfile">Load .txt / .csv</button>
+        <button class="ghost" id="sample">Use sample</button>
+        <button class="ghost" id="clear">Clear</button>
+      </div>
+      <input type="file" id="file" accept=".txt,.csv,text/plain" style="display:none">
+    </div>
+
+    <div class="card">
+      <h2>2 · Barcode</h2>
+      <p class="hint">Format applies to every value on the sheet.</p>
+      <label for="format">Symbology</label>
+      <select id="format">
+        <optgroup label="General">
+          <option value="CODE128" selected>Code 128 (auto A/B/C) — general purpose</option>
+          <option value="CODE128B">Code 128 B — text</option>
+          <option value="CODE128C">Code 128 C — numeric pairs only</option>
+          <option value="CODE39">Code 39</option>
+          <option value="CODE93">Code 93</option>
+          <option value="ITF">ITF (Interleaved 2 of 5)</option>
+          <option value="MSI">MSI</option>
+          <option value="pharmacode">Pharmacode</option>
+          <option value="codabar">Codabar</option>
+        </optgroup>
+        <optgroup label="Retail (fixed length)">
+          <option value="EAN13">EAN-13 (12 or 13 digits)</option>
+          <option value="EAN8">EAN-8 (7 or 8 digits)</option>
+          <option value="UPC">UPC-A (11 or 12 digits)</option>
+          <option value="ITF14">ITF-14 (13 or 14 digits)</option>
+        </optgroup>
+      </select>
+      <div class="row">
+        <div>
+          <label for="barH">Bar height (mm)</label>
+          <input type="number" id="barH" value="13" min="4" max="60" step="0.5">
+        </div>
+        <div>
+          <label for="fontSize">Text size (pt)</label>
+          <input type="number" id="fontSize" value="8" min="4" max="18" step="0.5">
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" id="showText" checked> Print the number under each barcode</label>
+      <label class="check"><input type="checkbox" id="quietZone" checked> Include quiet zone (required for reliable scanning)</label>
+    </div>
+
+    <div class="card">
+      <h2>3 · Label sheet</h2>
+      <p class="hint">Sizes in millimetres. Match these to your label stock, or leave as-is for plain paper.</p>
+      <div class="row">
+        <div>
+          <label for="pageSize">Page</label>
+          <select id="pageSize">
+            <option value="letter" selected>Letter (216 × 279 mm)</option>
+            <option value="a4">A4 (210 × 297 mm)</option>
+            <option value="a5">A5 (148 × 210 mm)</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+        <div>
+          <label for="margin">Page margin (mm)</label>
+          <input type="number" id="margin" value="10" min="0" max="40" step="1">
+        </div>
+      </div>
+      <div class="row" id="customsize" style="display:none">
+        <div>
+          <label for="pageW">Page width (mm)</label>
+          <input type="number" id="pageW" value="216" min="50" max="500" step="1">
+        </div>
+        <div>
+          <label for="pageH">Page height (mm)</label>
+          <input type="number" id="pageH" value="279" min="50" max="500" step="1">
+        </div>
+      </div>
+      <div class="row three">
+        <div>
+          <label for="cols">Cols</label>
+          <input type="number" id="cols" value="3" min="1" max="8" step="1">
+        </div>
+        <div>
+          <label for="labelW">Label w (mm)</label>
+          <input type="number" id="labelW" value="60" min="10" max="300" step="0.5">
+        </div>
+        <div>
+          <label for="labelH">Label h (mm)</label>
+          <input type="number" id="labelH" value="30" min="8" max="200" step="0.5">
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label for="gap">Gap (mm)</label>
+          <input type="number" id="gap" value="4" min="0" max="40" step="0.5">
+        </div>
+        <div>
+          <label for="pad">Inner padding (mm)</label>
+          <input type="number" id="pad" value="2" min="0" max="20" step="0.5">
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" id="fitCols"> Auto-fit columns to page width</label>
+      <label class="check"><input type="checkbox" id="cutlines" checked> Show cut guides</label>
+      <label class="check"><input type="checkbox" id="remember" checked> Remember these settings on this device</label>
+    </div>
+  </div>
+
+  <!-- ================= PREVIEW ================= -->
+  <div class="previewwrap">
+    <div class="previewlabel">
+      <span>Preview — this is exactly what prints</span>
+      <span id="pages"></span>
+    </div>
+    <div class="page" id="page"><div class="sheet" id="sheet"></div></div>
+  </div>
+</div>
+
+<div class="statusbar">
+  <span class="stat">Values: <b id="stValues">0</b></span>
+  <span class="stat">Barcodes: <b id="stCodes">0</b></span>
+  <span class="stat" id="stSkipWrap">Skipped: <b id="stSkip">0</b></span>
+  <span class="stat" id="stXWrap">Bar width: <b id="stX">—</b></span>
+  <span class="stat">Labels/page: <b id="stPerPage">0</b></span>
+  <span class="spacer"></span>
+  <button class="ghost" id="regen">Regenerate</button>
+  <button class="primary" id="print">Print sheet</button>
+</div>
+
+<div id="snack"></div>
+
+<script>
+(function(){
+  "use strict";
+  var MM = 96 / 25.4;            // css px per mm
+  var PAGES = { letter:[215.9,279.4], a4:[210,297], a5:[148,210] };
+  var $ = function(id){ return document.getElementById(id); };
+  var snackT;
+  function snack(msg, isErr){
+    var el = $("snack");
+    el.textContent = msg;
+    el.className = "show" + (isErr ? " err" : "");
+    clearTimeout(snackT);
+    snackT = setTimeout(function(){ el.className = ""; }, 2600);
+  }
+  function n(id, def, min, max){
+    var v = parseFloat($(id).value);
+    if (isNaN(v)) v = def;
+    if (min != null) v = Math.max(min, v);
+    if (max != null) v = Math.min(max, v);
+    return v;
+  }
+
+  var SETTINGS = ["values","format","barH","fontSize","showText","quietZone","pageSize","margin",
+                  "pageW","pageH","cols","labelW","labelH","gap","pad","fitCols","cutlines"];
+  function saveSettings(){
+    if (!$("remember").checked) return;
+    var o = {};
+    SETTINGS.forEach(function(id){
+      var el = $(id);
+      o[id] = el.type === "checkbox" ? el.checked : el.value;
+    });
+    try{ localStorage.setItem("barcode-sheet", JSON.stringify(o)); }catch(e){}
+  }
+  function loadSettings(){
+    var raw;
+    try{ raw = localStorage.getItem("barcode-sheet"); }catch(e){ return; }
+    if (!raw) return;
+    var o;
+    try{ o = JSON.parse(raw); }catch(e){ return; }
+    SETTINGS.forEach(function(id){
+      if (!(id in o)) return;
+      var el = $(id);
+      if (el.type === "checkbox") el.checked = !!o[id]; else el.value = o[id];
+    });
+  }
+
+  function pageDims(){
+    var ps = $("pageSize").value;
+    if (ps === "custom") return [n("pageW",216,50,500), n("pageH",279,50,500)];
+    return PAGES[ps] || PAGES.letter;
+  }
+
+  function setPageStyle(){
+    var d = pageDims(), m = n("margin",10,0,40), gap = n("gap",4,0,40);
+    var css = "@page{ size:" + (d[0]/25.4).toFixed(3) + "in " + (d[1]/25.4).toFixed(3) + "in; margin:" + m + "mm; }";
+    var tag = $("pagestyle") || document.createElement("style");
+    tag.id = "pagestyle"; tag.textContent = css;
+    if (!tag.parentNode) document.head.appendChild(tag);
+
+    var usableW = d[0] - 2*m, usableH = d[1] - 2*m;
+    var cols = Math.round(n("cols",3,1,8));
+    if ($("fitCols").checked){
+      cols = Math.max(1, Math.floor((usableW + gap) / (n("labelW",60,10,300) + gap)));
+      $("cols").value = cols;
+    }
+    // preview scales the page 1:1 in mm
+    var pg = $("page");
+    pg.style.width = d[0] + "mm";
+    pg.style.height = usableH + "mm";
+    pg.style.padding = m + "mm";
+    pg.style.background = "#fff";
+    var sh = $("sheet");
+    sh.style.gridTemplateColumns = "repeat(" + cols + ", " + (n("labelW",60,10,300)) + "mm)";
+    sh.style.gap = gap + "mm";
+    sh.style.justifyContent = "center";
+    sh.style.setProperty("--gap-mm", gap + "mm");
+    return { cols: cols, usableW: usableW, usableH: usableH };
+  }
+
+  function render(){
+    var vals = $("values").value.split(/\r?\n/).map(function(s){ return s.trim(); }).filter(function(s){ return s.length; });
+    var fmt = $("format").value;
+    var barHmm = n("barH",13,4,60);
+    var padmm  = n("pad",2,0,20);
+    var lw = n("labelW",60,10,300), lh = n("labelH",30,8,200);
+    var showText = $("showText").checked, quiet = $("quietZone").checked;
+    var fontSizePt = n("fontSize",8,4,18);
+
+    var geom = setPageStyle();
+    var sheet = $("sheet");
+    sheet.innerHTML = "";
+
+    var innerWpx = Math.max(10, (lw - 2*padmm) * MM);
+    var innerHpx = Math.max(10, (lh - 2*padmm) * MM);
+    var barHpx   = Math.min(barHmm * MM, innerHpx);
+    var fontPx   = fontSizePt * (96/72);
+    var ok = 0, skipped = [], tiny = 0, minX = Infinity;
+
+    if (!vals.length){
+      $("stValues").textContent = 0; $("stCodes").textContent = 0;
+      $("stSkip").textContent = 0; $("stPerPage").textContent = 0;
+      $("pages").textContent = "";
+      snack("Nothing to generate yet — paste some values", true);
+      return;
+    }
+
+    vals.forEach(function(v){
+      var div = document.createElement("div");
+      div.className = "label" + ($("cutlines").checked ? " outline" : "");
+      div.style.width = lw + "mm";
+      div.style.height = lh + "mm";
+      div.style.padding = padmm + "mm";
+
+      var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      div.appendChild(svg);
+      sheet.appendChild(div);
+
+      try{
+        // pass 1: measure module count (width=1, no margin, no text -> width attr == module count)
+        JsBarcode(svg, v, { format: fmt, width: 1, height: 40, displayValue: false, margin: 0 });
+        var mods = parseFloat(svg.getAttribute("width")) || 1;
+        svg.innerHTML = "";
+        // pass 2: choose module width so the bars + both 10-module quiet zones span the label's
+        // inner width. The quiet zone is left as real label whitespace (JsBarcode's `margin` is a
+        // uniform pixel pad, which would also inflate the height of short codes) -> margin stays 0
+        // and flexbox centring supplies the blank space.
+        var qz = quiet ? 20 : 0;
+        var modW = innerWpx / (mods + qz);
+        if (!isFinite(modW) || modW <= 0) modW = 1;
+        JsBarcode(svg, v, {
+          format: fmt,
+          width: modW,
+          height: barHpx,
+          displayValue: showText,
+          font: "monospace",
+          fontSize: fontPx,
+          textMargin: 2,
+          margin: 0
+        });
+        // safety net: some symbologies (EAN/UPC/Code93) draw human-readable digits wider than the
+        // bars. If the result still exceeds the label, scale it down uniformly via viewBox so it
+        // always fits without distorting the bar geometry.
+        var w = parseFloat(svg.getAttribute("width")) || innerWpx;
+        var h = parseFloat(svg.getAttribute("height")) || barHpx;
+        var scale = Math.min(1, innerWpx / w, Math.max(1, innerHpx) / h);
+        svg.setAttribute("viewBox", "0 0 " + w + " " + h);
+        svg.style.width = (w * scale) + "px";
+        svg.style.height = (h * scale) + "px";
+        // density check: an X-dimension under ~0.19 mm (7.5 mil) will not print reliably on a
+        // 300 dpi printer, so warn rather than hand over an unscannable sheet
+        var xmm = (modW / MM) * scale;
+        if (xmm > 0){ minX = Math.min(minX, xmm); if (xmm < 0.19) tiny++; }
+        ok++;
+      }catch(err){
+        svg.remove();
+        var bad = document.createElement("div");
+        bad.className = "bad";
+        bad.textContent = v + " — " + (err && err.message ? err.message : "invalid for " + fmt);
+        div.appendChild(bad);
+        skipped.push(v);
+      }
+    });
+
+    var perPage = geom.cols * Math.max(1, Math.floor((geom.usableH + n("gap",4,0,40)) / (lh + n("gap",4,0,40))));
+    var total = vals.length;
+    var pages = Math.max(1, Math.ceil(total / perPage));
+    $("stValues").textContent = total;
+    $("stCodes").textContent = ok;
+    $("stSkip").textContent = skipped.length;
+    $("stSkipWrap").className = "stat" + (skipped.length ? " bad" : "");
+    $("stPerPage").textContent = geom.cols + " × " + Math.max(1, Math.floor(perPage/geom.cols)) + " = " + perPage;
+    $("pages").textContent = total + " label" + (total===1?"":"s") + " · " + pages + " page" + (pages===1?"":"s");
+    $("stSkipWrap").title = skipped.slice(0,12).join(", ");
+    if (isFinite(minX)){
+      $("stX").textContent = minX.toFixed(2) + " mm";
+      $("stXWrap").className = "stat" + (tiny ? " bad" : "");
+      $("stXWrap").title = tiny ? tiny + " barcode(s) are too dense to print reliably on a 300 dpi printer — use a wider label, fewer values per line, or a shorter value" : "Narrowest bar module on this sheet";
+    } else {
+      $("stX").textContent = "—"; $("stXWrap").className = "stat"; $("stXWrap").title = "";
+    }
+    saveSettings();
+    window.__report = { total: total, ok: ok, skipped: skipped, tiny: tiny, minXmm: isFinite(minX) ? +minX.toFixed(4) : null, perPage: perPage, cols: geom.cols };
+    return window.__report;
+  }
+
+  /* ---------- events ---------- */
+  var t;
+  function debounced(){ clearTimeout(t); t = setTimeout(render, 220); }
+  ["values","format","barH","fontSize","pageSize","margin","pageW","pageH","cols",
+   "labelW","labelH","gap","pad"].forEach(function(id){
+    $(id).addEventListener("input", debounced);
+    $(id).addEventListener("change", function(){ if(id==="pageSize") toggleCustom(); render(); });
+  });
+  ["showText","quietZone","fitCols","cutlines"].forEach(function(id){
+    $(id).addEventListener("change", render);
+  });
+  $("remember").addEventListener("change", function(){
+    if (!$("remember").checked){ try{ localStorage.removeItem("barcode-sheet"); }catch(e){} snack("Settings won't be remembered"); }
+    else { saveSettings(); snack("Settings will be remembered"); }
+  });
+  function toggleCustom(){ $("customsize").style.display = $("pageSize").value === "custom" ? "" : "none"; }
+
+  $("regen").addEventListener("click", function(){ render(); snack("Regenerated " + $("stCodes").textContent + " barcodes"); });
+  $("print").addEventListener("click", function(){
+    if (document.querySelector(".label svg") === null){ snack("Nothing to print — add values first", true); return; }
+    snack("Opening print dialog…");
+    setTimeout(function(){ window.print(); }, 120);
+  });
+  $("clear").addEventListener("click", function(){ $("values").value = ""; render(); snack("Cleared all values"); });
+  $("sample").addEventListener("click", function(){
+    var f = $("format").value;
+    if (f === "EAN13"){
+      $("values").value = ["012345678905","400638133393","590123412345","978020137962"].join("\n");
+    } else if (f === "UPC"){
+      $("values").value = ["03600029145","01234567890","65432109876","11122233344"].join("\n");
+    } else if (f === "EAN8"){
+      $("values").value = ["5512345","9638507","1234567","7654321"].join("\n");
+    } else if (f === "ITF14"){
+      $("values").value = ["1540014128876","0001234567890","9876543210987","1111111111111"].join("\n");
+    } else if (f === "pharmacode"){
+      $("values").value = ["12","345","6789","4000"].join("\n");
+    } else if (f === "CODE128C"){
+      $("values").value = ["12345678","9988776655","01020304","42424242"].join("\n");
+    } else if (f === "ITF"){
+      $("values").value = ["12345678","98765432","10101010","55555556"].join("\n");
+    } else if (f === "MSI" || f === "codabar"){
+      $("values").value = ["1234567","9876543","1010101","5555555"].join("\n");
+    } else {
+      $("values").value = ["WESLEY-1001","WESLEY-1002","WESLEY-1003","SHMINGUS-A","SHMINGUS-B","TWR-42"].join("\n");
+    }
+    render(); snack("Loaded a sample set");
+  });
+  $("loadfile").addEventListener("click", function(){ $("file").click(); });
+  $("file").addEventListener("change", function(e){
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    var r = new FileReader();
+    r.onload = function(){
+      var lines = String(r.result).split(/\r?\n/).map(function(s){
+        // take the first CSV cell if the line looks like a spreadsheet row
+        var c = s.split(",")[0];
+        return (c != null ? c : s).trim().replace(/^"|"$/g,"");
+      }).filter(function(s){ return s.length; });
+      $("values").value = lines.join("\n");
+      render();
+      snack("Loaded " + lines.length + " values from " + f.name);
+    };
+    r.onerror = function(){ snack("Couldn't read that file", true); };
+    r.readAsText(f);
+    e.target.value = "";
+  });
+  window.addEventListener("beforeprint", function(){ $("page").style.boxShadow = "none"; });
+  window.addEventListener("afterprint", function(){ $("page").style.boxShadow = ""; snack("Print dialog closed"); });
+
+  /* ---------- boot ---------- */
+  loadSettings();
+  toggleCustom();
+  if (!$("values").value) $("values").value = ["WESLEY-1001","WESLEY-1002","WESLEY-1003","SHMINGUS-A","SHMINGUS-B","TWR-42"].join("\n");
+  render();
+})();
+</script>
+</body>
+</html>
