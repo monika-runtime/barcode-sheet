@@ -106,6 +106,11 @@
   }
   .menu button:hover{background:#242c37; border-color:transparent}
   .menu button code{color:var(--accent); font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace}
+  .menu button.act{box-shadow:inset 0 0 0 1px var(--accent2)}
+  .menu .row{display:flex; align-items:center; gap:6px; padding:2px 8px 8px}
+  .menu .row input{width:58px; padding:6px 6px; text-align:center; font-size:12.5px}
+  .menu .row span{font-size:12px; color:var(--dim)}
+  .menu .row button{width:auto; flex:0 0 auto; background:#242c37; border:1px solid var(--line); padding:6px 10px; justify-content:center}
 
   /* ---------- status bar ---------- */
   .statusbar{
@@ -356,7 +361,7 @@
           <h3>Page &amp; printing</h3>
           <label class="check"><input type="checkbox" id="fitCols"> Auto-fit columns to page width</label>
           <label class="check"><input type="checkbox" id="cutlines" checked> Show cut guides</label>
-          <label class="check"><input type="checkbox" id="remember" checked> Remember these settings on this device</label>
+          <label class="check" title="Sizes and options are kept on this device. The value list is only kept for 30 minutes, then the sheet opens blank."><input type="checkbox" id="remember" checked> Remember these settings on this device</label>
         </div>
       </div>
     </div>
@@ -417,6 +422,9 @@
 
   var SETTINGS = ["values","format","barH","fontSize","showText","quietZone","pageSize","margin",
                   "pageW","pageH","cols","labelW","labelH","gap","pad","fitCols","cutlines"];
+  // The value list is scratch work, not a document. It survives a reload while you are still
+  // working on it, then expires: whoever opens this later gets a blank sheet, not your job.
+  var VALUES_TTL_MIN = 30, EXPIRED = false, SEEN = false;
   function saveSettings(){
     if (!$("remember").checked) return;
     var o = {};
@@ -424,6 +432,7 @@
       var el = $(id);
       o[id] = el.type === "checkbox" ? el.checked : el.value;
     });
+    o.valuesAt = Date.now();
     o.layout = LAYOUT;
     o.tab = ACTIVE_TAB;
     try{ localStorage.setItem("barcode-sheet", JSON.stringify(o)); }catch(e){}
@@ -431,9 +440,17 @@
   function loadSettings(){
     var raw;
     try{ raw = localStorage.getItem("barcode-sheet"); }catch(e){ return; }
-    if (!raw) return;
+    if (!raw) return;                        // never used here before: the sample data is the welcome
+    SEEN = true;
     var o;
     try{ o = JSON.parse(raw); }catch(e){ return; }
+    // No stamp means it was saved before the list had a shelf life: treat it as expired too.
+    var age = o.valuesAt ? Date.now() - o.valuesAt : Infinity;
+    if (age > VALUES_TTL_MIN*60000 && (o.values || o.layout)){
+      EXPIRED = true;
+      delete o.values;          // start blank
+      delete o.layout;          // an arrangement only means something next to its own list
+    }
     SETTINGS.forEach(function(id){
       if (!(id in o)) return;
       var el = $(id);
@@ -666,7 +683,10 @@
       $("pages").textContent = "";
       LAYOUT = null; LASTCOUNT = -1; NODES = [];
       updateLayoutStat();
-      snack("Nothing to generate yet — paste some values", true);
+      // A cleared box is zero labels, not the last list: keep the machine-readable report honest
+      window.__report = { total: 0, ok: 0, skipped: [], tiny: 0, minXmm: null, perPage: 0,
+                          cols: 0, slots: 0, blanks: 0, layout: [], custom: false };
+      snack("Nothing to generate yet \u2014 paste some values", true);
       return;
     }
 
@@ -787,9 +807,16 @@
   ];
   function buildDateMenu(){
     var menu = $("dateMenu"), html = "", last = null;
+    var act = DATE_FORMATS[DATE_SEL] || DATE_FORMATS[0];
+    html += '<div class="grp">Range \u00b7 ' + act.label + '</div><div class="row">' +
+            '<button type="button" data-range="-1" title="Add the last N days, ending today">Last</button>' +
+            '<input id="rangeN" type="number" min="1" max="400" step="1" value="' + RANGE_N + '" aria-label="Number of days">' +
+            '<span>days</span>' +
+            '<button type="button" data-range="1" title="Add the next N days, starting tomorrow">Next</button></div>';
     DATE_FORMATS.forEach(function(f, i){
       if (f.g !== last){ html += '<div class="grp">' + f.g + '</div>'; last = f.g; }
-      html += '<button type="button" role="menuitem" data-i="' + i + '" title="' + f.note + '">' +
+      html += '<button type="button" role="menuitem" data-i="' + i + '"' + (i === DATE_SEL ? ' class="act"' : '') +
+              ' title="' + f.note + '">' +
               '<span>' + f.label + '</span><code>' + f.fn(new Date()) + '</code></button>';
     });
     menu.innerHTML = html;
@@ -811,19 +838,49 @@
     $("dateMore").className = "on";
     $("dateMore").setAttribute("aria-expanded", "true");
   }
+  // The range uses the last format you picked, so "ISO for a week" is two clicks.
+  var DATE_SEL = 0, RANGE_N = 7;
+  function appendValues(list){
+    var ta = $("values"), cur = ta.value.replace(/\s+$/, "");
+    ta.value = (cur ? cur + "\n" : "") + list.join("\n");
+    render();
+    return (window.__report && window.__report.skipped) || [];
+  }
   function insertDate(i){
     var f = DATE_FORMATS[i];
     if (!f) return;
-    var v = f.fn(new Date()), ta = $("values");
-    var cur = ta.value.replace(/\s+$/, "");
-    ta.value = (cur ? cur + "\n" : "") + v;
-    render();
-    var skipped = (window.__report && window.__report.skipped) || [];
+    DATE_SEL = i;
+    var v = f.fn(new Date());
+    var skipped = appendValues([v]);
     if (skipped.indexOf(v) >= 0){
       snack(v + " added, but it does not fit " + $("format").value + " \u2014 see Skipped", true);
     } else {
       snack("Added " + f.label + " \u2192 " + v);
     }
+    if ($("dateMenu").classList.contains("on")) buildDateMenu();
+  }
+  function rangeDays(){
+    var el = $("rangeN");
+    if (!el) return RANGE_N;                  // menu not open: reuse the last count
+    var v = parseInt(el.value, 10);
+    if (!(v > 0)) return 0;                   // empty or nonsense: say so, do not guess
+    RANGE_N = Math.min(400, v);
+    return RANGE_N;
+  }
+  // dir -1: the last N days ending today. dir +1: the next N days starting tomorrow.
+  function insertDateRange(dir, count){
+    var nd = Math.min(400, parseInt(count, 10) || 0);
+    if (!(nd > 0)){ snack("How many days? Type a number, then Last or Next", true); return; }
+    var f = DATE_FORMATS[DATE_SEL] || DATE_FORMATS[0];
+    var out = [], off = dir < 0 ? -(nd - 1) : 1;
+    for (var k = 0; k < nd; k++){
+      var d = new Date(); d.setDate(d.getDate() + off + k);
+      out.push(f.fn(d));
+    }
+    var skipped = appendValues(out);
+    var lost = out.filter(function(v){ return skipped.indexOf(v) >= 0; }).length;
+    snack("Added " + nd + " dates \u2014 " + (dir < 0 ? "the last " : "the next ") + nd +
+          " days as " + f.label + (lost ? " (" + lost + " do not fit " + $("format").value + ")" : ""), !!lost);
   }
 
   /* ---------- sheet layout: drag to reposition, snapping to the grid ---------- */
@@ -872,13 +929,18 @@
       window.__report.custom = isCustomLayout();
     }
   }
+  // LAYOUT is null whenever the list is empty, so both of these read it as "no arrangement":
+  // without the guard an empty values box threw inside updateLayoutStat() and the rest of that
+  // render never ran (no "nothing to generate" notice, stale report).
   function isCustomLayout(){
-    for (var i = 0; i < LAYOUT.length; i++){ if (LAYOUT[i] !== i) return true; }
+    var L = LAYOUT || [];
+    for (var i = 0; i < L.length; i++){ if (L[i] !== i) return true; }
     return false;
   }
   function updateLayoutStat(){
+    var L = LAYOUT || [];
     var custom = isCustomLayout(), moved = 0;
-    for (var i = 0; i < LAYOUT.length; i++){ if (LAYOUT[i] !== i) moved++; }
+    for (var i = 0; i < L.length; i++){ if (L[i] !== i) moved++; }
     $("stLayout").textContent = custom ? "custom" : "paste order";
     $("stLayoutWrap").className = "stat" + (custom ? "" : "");
     $("stLayoutWrap").title = custom
@@ -1046,9 +1108,26 @@
   });
   $("dateMenu").addEventListener("click", function(e){
     var b = e.target.closest && e.target.closest("button[data-i]");
-    if (!b) return;
-    insertDate(parseInt(b.getAttribute("data-i"), 10));
-    closeDateMenu();
+    if (b){
+      insertDate(parseInt(b.getAttribute("data-i"), 10));
+      closeDateMenu();
+      return;
+    }
+    var r = e.target.closest && e.target.closest("button[data-range]");
+    if (r){
+      insertDateRange(parseInt(r.getAttribute("data-range"), 10), rangeDays());
+      closeDateMenu();
+    }
+  });
+  $("dateMenu").addEventListener("input", function(e){
+    if (e.target && e.target.id === "rangeN") rangeDays();
+  });
+  $("dateMenu").addEventListener("keydown", function(e){
+    if (e.target && e.target.id === "rangeN" && e.key === "Enter"){
+      e.preventDefault();
+      insertDateRange(-1, rangeDays());
+      closeDateMenu();
+    }
   });
   document.addEventListener("click", function(e){
     if (!$("dateSplit").contains(e.target)) closeDateMenu();
@@ -1056,7 +1135,8 @@
   document.addEventListener("keydown", function(e){ if (e.key === "Escape") closeDateMenu(); });
   window.__fit = { scale: function(){ return PREVIEW_SCALE; }, apply: applyFit, chrome: measureChrome };
   window.__tabs = { show: showTab, active: function(){ return ACTIVE_TAB; } };
-  window.__dates = { labels: DATE_FORMATS.map(function(f){ return f.label; }), insert: insertDate, close: closeDateMenu };
+  window.__dates = { labels: DATE_FORMATS.map(function(f){ return f.label; }), insert: insertDate,
+                     range: insertDateRange, sel: function(){ return DATE_FORMATS[DATE_SEL].label; }, close: closeDateMenu };
   $("pageslot").addEventListener("pointerdown", dragStart);
   $("pageslot").addEventListener("keydown", keyMove);
   $("resetLayout").addEventListener("click", function(){
@@ -1118,8 +1198,13 @@
   /* ---------- boot ---------- */
   loadSettings();
   toggleCustom();
-  if (!$("values").value) $("values").value = ["WESLEY-1001","WESLEY-1002","WESLEY-1003","SHMINGUS-A","SHMINGUS-B","TWR-42"].join("\n");
+  // A first-time visitor gets the sample. A returning visitor whose list expired gets nothing:
+  // the values box is blank on purpose, so nothing from a previous session can be printed by mistake.
+  if (!$("values").value && !SEEN){
+    $("values").value = ["WESLEY-1001","WESLEY-1002","WESLEY-1003","SHMINGUS-A","SHMINGUS-B","TWR-42"].join("\n");
+  }
   render();
+  if (EXPIRED){ saveSettings(); snack("Started blank \u2014 the previous list was older than " + VALUES_TTL_MIN + " minutes"); }
 })();
 </script>
 

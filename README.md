@@ -36,6 +36,22 @@ value as a preview: `YYYY-MM-DD`, `YYMMDD`, `MMDDYYYY`, `DDMMYYYY`, `DD/MM/YYYY`
 `YYYYMMDD-HHMM`, `YYYYMMDDHHMMSS`, `YYYY-MM-DD_HH-MM-SS`, `YYDDD` (Julian day of year),
 `YYYY-Www` (ISO week) and `MMM-DD-YYYY`.
 
+### A range of dates
+
+The same menu has a **Range** row: type a number of days and press **Last** or **Next** to
+add that many labels in one go — the last N days ending today, or the next N days starting
+tomorrow, in date order. Press Enter in the box for **Last**.
+
+```
+Range · YYYYMMDD
+[ Last ] [ 7 ] days [ Next ]
+```
+
+The range is written in the format you last picked from the list, so choosing
+`YYYY-MM-DD` and pressing Last 7 gives a week of ISO dates — and the row header always
+shows which format it will use, so there is nothing to remember. The list is capped at
+400 days per click.
+
 Dates come from the device's local date, not UTC. Digit-only symbologies (ITF, MSI,
 pharmacode, EAN, UPC) cannot encode a dashed or slashed date — the insert still happens
 and the status bar flags it under **Skipped** rather than printing a broken code.
@@ -82,6 +98,19 @@ Drag any label in the preview to move it; it snaps to the label grid. Dropping o
 occupied cell swaps the two, and dropping onto blank paper leaves a deliberately empty
 cell — which is what you want when printing onto a partly-used label sheet. Focus a label
 and use the arrow keys to make the same move without a mouse.
+
+### What is remembered, and for how long
+
+Sizes, options and the layout live in this browser's `localStorage` — but **the value list
+is deliberately short-lived**. It survives a reload while you are still working on it, and
+expires after **30 minutes** of not being touched. Open the page later and the values box
+is blank (with a notice saying so), while your label sizes, symbology and other settings
+are still where you left them. A device that has never used the app gets the six sample
+values instead, as a welcome.
+
+The reason is simple: this is a scratch pad for a job, not a document store. Nobody should
+open the page tomorrow and find — and print — somebody else's labels. Untick **Remember
+these settings on this device** and nothing is stored at all, not even for 30 minutes.
 
 The layout is remembered alongside the other settings. The status bar shows
 `Layout: custom` once the arrangement differs from paste order, and **Reset layout**
