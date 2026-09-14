@@ -10,6 +10,18 @@ no server, no uploads, no tracking. Deployed at <https://barcode.shmingus.net>.
 - Live preview of the exact page that prints
 - Print straight to a label sheet or plain paper, with cut guides
 
+## Adding dates
+
+**Date** inserts today's date as `YYYYMMDD` — compact, sortable, and safe for every
+symbology. The caret beside it opens the rest of the formats, each shown with today's
+value as a preview: `YYYY-MM-DD`, `YYMMDD`, `MMDDYYYY`, `DDMMYYYY`, `DD/MM/YYYY`,
+`YYYYMMDD-HHMM`, `YYYYMMDDHHMMSS`, `YYYY-MM-DD_HH-MM-SS`, `YYDDD` (Julian day of year),
+`YYYY-Www` (ISO week) and `MMM-DD-YYYY`.
+
+Dates come from the device's local date, not UTC. Digit-only symbologies (ITF, MSI,
+pharmacode, EAN, UPC) cannot encode a dashed or slashed date — the insert still happens
+and the status bar flags it under **Skipped** rather than printing a broken code.
+
 ## Symbologies
 
 | Format | Constraint |

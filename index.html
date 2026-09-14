@@ -59,6 +59,25 @@
   button.ghost{background:transparent}
   button:disabled{opacity:.45; cursor:not-allowed}
 
+  /* ---------- date button with format menu ---------- */
+  .split{position:relative}
+  .split .pair{display:flex}
+  .split #dateAdd{border-top-right-radius:0; border-bottom-right-radius:0; border-right-color:transparent}
+  .split #dateMore{border-top-left-radius:0; border-bottom-left-radius:0; padding:9px 11px; font-size:11px}
+  .split #dateMore.on{border-color:var(--accent2); color:#fff}
+  .menu{
+    display:none; margin-top:8px; padding:6px; background:var(--panel2);
+    border:1px solid var(--line); border-radius:10px;
+  }
+  .menu.on{display:block}
+  .menu .grp{font-size:10.5px; text-transform:uppercase; letter-spacing:.09em; color:var(--dim); padding:8px 8px 3px}
+  .menu button{
+    display:flex; justify-content:space-between; align-items:center; gap:14px; width:100%;
+    background:transparent; border:0; border-radius:7px; padding:7px 8px; text-align:left; font-size:12.5px;
+  }
+  .menu button:hover{background:#242c37; border-color:transparent}
+  .menu button code{color:var(--accent); font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace}
+
   /* ---------- status bar ---------- */
   .statusbar{
     position:sticky; bottom:0; background:var(--panel); border-top:1px solid var(--line);
@@ -154,6 +173,13 @@
         <button class="ghost" id="loadfile">Load .txt / .csv</button>
         <button class="ghost" id="sample">Use sample</button>
         <button class="ghost" id="clear">Clear</button>
+      </div>
+      <div class="split" id="dateSplit">
+        <div class="pair">
+          <button class="ghost" id="dateAdd" title="Add today's date (YYYYMMDD) to the list">Date</button>
+          <button class="ghost" id="dateMore" aria-haspopup="true" aria-expanded="false" title="Other date formats">&#9662;</button>
+        </div>
+        <div class="menu" id="dateMenu" role="menu" aria-label="Date formats"></div>
       </div>
       <input type="file" id="file" accept=".txt,.csv,text/plain" style="display:none">
     </div>
@@ -378,7 +404,29 @@
     NODES = [];
     // The layout rebuilds itself in paste order whenever the number of values changes, so
     // editing the list can never leave a stale arrangement behind.
-    if (LASTCOUNT >= 0 && LASTCOUNT !== vals.length) LAYOUT = null;
+    if (LASTCOUNT >= 0 && LASTCOUNT !== vals.length){
+      // Adding a value (pasting a date, say) should extend the arrangement, not destroy it:
+      // keep a custom layout when every existing value is still placed exactly once, and
+      // append the new value(s) after the last placement. Anything else (removal, re-paste)
+      // rebuilds in paste order.
+      var keep = false;
+      if (vals.length > LASTCOUNT && LAYOUT){
+        var seen = {}, placed = 0, okp = true;
+        for (var li = 0; li < LAYOUT.length; li++){
+          var lv = LAYOUT[li];
+          if (lv == null) continue;
+          if (lv >= LASTCOUNT || seen[lv]){ okp = false; break; }
+          seen[lv] = 1; placed++;
+        }
+        keep = okp && placed === LASTCOUNT;
+      }
+      if (keep){
+        while (LAYOUT.length && LAYOUT[LAYOUT.length - 1] == null) LAYOUT.pop();
+        for (var nk = LASTCOUNT; nk < vals.length; nk++) LAYOUT.push(nk);
+      } else {
+        LAYOUT = null;
+      }
+    }
     if (!LAYOUT || !LAYOUT.length) LAYOUT = vals.map(function(_, i){ return i; });
     LAYOUT = LAYOUT.filter(function(vi){ return vi == null || (vi >= 0 && vi < vals.length); });
     if (!LAYOUT.length) LAYOUT = vals.map(function(_, i){ return i; });
@@ -481,8 +529,76 @@
       $("stX").textContent = "—"; $("stXWrap").className = "stat"; $("stXWrap").title = "";
     }
     saveSettings();
+    labelDateButton();
     window.__report = { total: total, ok: ok, skipped: skipped, tiny: tiny, minXmm: isFinite(minX) ? +minX.toFixed(4) : null, perPage: perPage, cols: geom.cols, slots: slots, blanks: blanks, layout: LAYOUT.slice(), custom: isCustomLayout() };
     return window.__report;
+  }
+
+  /* ---------- date insertion: button + format menu ---------- */
+  function pad2(x){ return (x < 10 ? "0" : "") + x; }
+  function dayOfYear(d){ return Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 86400000); }
+  function isoWeek(d){
+    var t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    var dow = t.getUTCDay() || 7;
+    t.setUTCDate(t.getUTCDate() + 4 - dow);
+    var jan1 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+    return { year: t.getUTCFullYear(), week: Math.ceil((((t - jan1) / 86400000) + 1) / 7) };
+  }
+  var MON = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  // Local date on purpose: "today" means the day the user is standing in, not UTC.
+  var DATE_FORMATS = [
+    { g:"Date", label:"YYYYMMDD",        note:"compact and sortable \u2014 the default", fn:function(d){ return "" + d.getFullYear() + pad2(d.getMonth()+1) + pad2(d.getDate()); } },
+    { g:"Date", label:"YYYY-MM-DD",      note:"ISO 8601",        fn:function(d){ return d.getFullYear() + "-" + pad2(d.getMonth()+1) + "-" + pad2(d.getDate()); } },
+    { g:"Date", label:"YYMMDD",          note:"two-digit year",  fn:function(d){ return String(d.getFullYear()).slice(2) + pad2(d.getMonth()+1) + pad2(d.getDate()); } },
+    { g:"Date", label:"MMDDYYYY",        note:"month first (US)", fn:function(d){ return pad2(d.getMonth()+1) + pad2(d.getDate()) + d.getFullYear(); } },
+    { g:"Date", label:"DDMMYYYY",        note:"day first (EU)",  fn:function(d){ return pad2(d.getDate()) + pad2(d.getMonth()+1) + d.getFullYear(); } },
+    { g:"Date", label:"DD/MM/YYYY",      note:"slash separated", fn:function(d){ return pad2(d.getDate()) + "/" + pad2(d.getMonth()+1) + "/" + d.getFullYear(); } },
+    { g:"Date and time", label:"YYYYMMDD-HHMM",      note:"date plus the minute",  fn:function(d){ return "" + d.getFullYear() + pad2(d.getMonth()+1) + pad2(d.getDate()) + "-" + pad2(d.getHours()) + pad2(d.getMinutes()); } },
+    { g:"Date and time", label:"YYYYMMDDHHMMSS",     note:"full timestamp",        fn:function(d){ return "" + d.getFullYear() + pad2(d.getMonth()+1) + pad2(d.getDate()) + pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds()); } },
+    { g:"Date and time", label:"YYYY-MM-DD_HH-MM-SS", note:"readable, filename-safe", fn:function(d){ return d.getFullYear() + "-" + pad2(d.getMonth()+1) + "-" + pad2(d.getDate()) + "_" + pad2(d.getHours()) + "-" + pad2(d.getMinutes()) + "-" + pad2(d.getSeconds()); } },
+    { g:"Other", label:"YYDDD",       note:"Julian: year + day of year", fn:function(d){ return String(d.getFullYear()).slice(2) + ("00" + dayOfYear(d)).slice(-3); } },
+    { g:"Other", label:"YYYY-Www",    note:"ISO week number",           fn:function(d){ var w = isoWeek(d); return w.year + "-W" + pad2(w.week); } },
+    { g:"Other", label:"MMM-DD-YYYY", note:"e.g. " + MON[0] + "-01-2026", fn:function(d){ return MON[d.getMonth()] + "-" + pad2(d.getDate()) + "-" + d.getFullYear(); } }
+  ];
+  function buildDateMenu(){
+    var menu = $("dateMenu"), html = "", last = null;
+    DATE_FORMATS.forEach(function(f, i){
+      if (f.g !== last){ html += '<div class="grp">' + f.g + '</div>'; last = f.g; }
+      html += '<button type="button" role="menuitem" data-i="' + i + '" title="' + f.note + '">' +
+              '<span>' + f.label + '</span><code>' + f.fn(new Date()) + '</code></button>';
+    });
+    menu.innerHTML = html;
+  }
+  function labelDateButton(){
+    var v = DATE_FORMATS[0].fn(new Date());
+    $("dateAdd").textContent = "\uD83D\uDCC5 " + v;
+    $("dateAdd").title = "Add today's date (" + v + ") to the list";
+    if ($("dateMenu").classList.contains("on")) buildDateMenu();
+  }
+  function closeDateMenu(){
+    $("dateMenu").className = "menu";
+    $("dateMore").className = "";
+    $("dateMore").setAttribute("aria-expanded", "false");
+  }
+  function openDateMenu(){
+    buildDateMenu();
+    $("dateMenu").className = "menu on";
+    $("dateMore").className = "on";
+    $("dateMore").setAttribute("aria-expanded", "true");
+  }
+  function insertDate(i){
+    var f = DATE_FORMATS[i];
+    if (!f) return;
+    var v = f.fn(new Date()), ta = $("values");
+    var cur = ta.value.replace(/\s+$/, "");
+    ta.value = (cur ? cur + "\n" : "") + v;
+    render();
+    var skipped = (window.__report && window.__report.skipped) || [];
+    if (skipped.indexOf(v) >= 0){
+      snack(v + " added, but it does not fit " + $("format").value + " \u2014 see Skipped", true);
+    } else {
+      snack("Added " + f.label + " \u2192 " + v);
+    }
   }
 
   /* ---------- sheet layout: drag to reposition, snapping to the grid ---------- */
@@ -647,6 +763,22 @@
   });
   function toggleCustom(){ $("customsize").style.display = $("pageSize").value === "custom" ? "" : "none"; }
 
+  $("dateAdd").addEventListener("click", function(){ insertDate(0); });
+  $("dateMore").addEventListener("click", function(e){
+    e.stopPropagation();
+    if ($("dateMenu").classList.contains("on")) closeDateMenu(); else openDateMenu();
+  });
+  $("dateMenu").addEventListener("click", function(e){
+    var b = e.target.closest && e.target.closest("button[data-i]");
+    if (!b) return;
+    insertDate(parseInt(b.getAttribute("data-i"), 10));
+    closeDateMenu();
+  });
+  document.addEventListener("click", function(e){
+    if (!$("dateSplit").contains(e.target)) closeDateMenu();
+  });
+  document.addEventListener("keydown", function(e){ if (e.key === "Escape") closeDateMenu(); });
+  window.__dates = { labels: DATE_FORMATS.map(function(f){ return f.label; }), insert: insertDate, close: closeDateMenu };
   $("sheet").addEventListener("pointerdown", dragStart);
   $("sheet").addEventListener("keydown", keyMove);
   $("resetLayout").addEventListener("click", function(){
